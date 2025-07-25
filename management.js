@@ -1631,3 +1631,17 @@ self.addEventListener('fetch', (event) => {
       .then((response) => response || fetch(event.request))
   );
 });
+//file storage in my database
+import postgres from 'postgres'
+
+const connectionString = process.env.DATABASE_URL
+const sql = postgres(connectionString)
+
+export default sql
+
+//database api structure
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = 'https://uikkgavreddykndzapvf.supabase.co'
+const supabaseKey = process.env.SUPABASE_KEY
+const supabase = createClient(supabaseUrl, supabaseKey)
