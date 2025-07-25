@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0d6efd">
+    <meta name="description" content="Bamburi Tilapia Hotel Employee Management System">
+    <title>Bamburi Tilapia Hotel - Employee Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="management.css">
+</head>
+<body>
+    <div class="container-fluid">
+        <header class="bg-primary text-white p-3 mb-4">
+            <h1>Bamburi Tilapia Hotel</h1>
+            <h2>Employee Management System</h2>
+        </header>
+
+        <div class="row">
+            <!-- Main Navigation -->
+            <div class="col-md-3">
+                <div class="list-group">
+                    <button class="list-group-item list-group-item-action active" data-bs-toggle="tab" data-bs-target="#register">Register Employee</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#attendance">Attendance</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#lateEmployees">Late Employees</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#absentEmployees">Absent Employees</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#leaveDays">Leave/Rest Days</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#salaryCalc">Salary Calculation</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#search">Search Employees</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#deregister">Deregister Employee</button>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-9">
+                <div class="tab-content">
+                    <!-- Register Employee -->
+                    <div class="tab-pane fade show active" id="register">
+                        <h3>Register New Employee</h3>
+                        <form id="employeeForm">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="empId" class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" id="empId" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="fullName" class="form-label">Full Name</label>
+                                    <input type="text" class="form-control" id="fullName" required>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="phoneNumber" class="form-label">Phone Number</label>
+                                    <input type="tel" class="form-control" id="phoneNumber" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="shiftType" class="form-label">Shift Type</label>
+                                    <select class="form-select" id="shiftType" required>
+                                        <option value="">Select Shift</option>
+                                        <option value="day">Day Shift (09:30 AM)</option>
+                                        <option value="night">Night Shift (09:30 PM)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="workingDays" class="form-label">Working Days per Month</label>
+                                    <input type="number" class="form-control" id="workingDays" min="1" max="31" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="agreedSalary" class="form-label">Agreed Salary (Ksh)</label>
+                                    <input type="number" class="form-control" id="agreedSalary" required>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="paymentDay" class="form-label">Payment Day of Month</label>
+                                    <input type="number" class="form-control" id="paymentDay" min="1" max="31" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Register Employee</button>
+                        </form>
+                    </div>
+
+                    <!-- Attendance -->
+                    <div class="tab-pane fade" id="attendance">
+                        <h3>Record Attendance</h3>
+                        <form id="attendanceForm">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="attendanceEmpId" class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" id="attendanceEmpId" required>
+                                    <div id="employeeSuggestions" class="suggestions-dropdown"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="attendanceDate" class="form-label">Date</label>
+                                    <input type="date" class="form-control" id="attendanceDate" required>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="arrivalTime" class="form-label">Arrival Time</label>
+                                    <input type="time" class="form-control" id="arrivalTime" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="shiftTypeAttendance" class="form-label">Shift Type</label>
+                                    <select class="form-select" id="shiftTypeAttendance" required>
+                                        <option value="">Select Shift</option>
+                                        <option value="day">Day Shift</option>
+                                        <option value="night">Night Shift</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Record Attendance</button>
+                        </form>
+                        <div class="mt-4" id="attendanceStatus"></div>
+                    </div>
+
+                    <!-- Late Employees -->
+                    <div class="tab-pane fade" id="lateEmployees">
+                        <h3>Late Employees</h3>
+                        <div class="alert alert-info">
+                            Employees who arrived late to work today
+                        </div>
+                        <div class="mb-3">
+                            <button class="btn btn-sm btn-warning" id="notifyLateEmployees">
+                                <i class="bi bi-bell-fill"></i> Notify Late Employees
+                            </button>
+                            <button class="btn btn-sm btn-success ms-2" id="exportLateEmployees">
+                                <i class="bi bi-download"></i> Export as CSV
+                            </button>
+                            <button class="btn btn-sm btn-danger ms-2" id="printLateEmployees">
+                                <i class="bi bi-printer-fill"></i> Print
+                            </button>
+                        </div>
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Employee ID</th>
+                                    <th>Name</th>
+                                    <th>Shift</th>
+                                    <th>Arrival Time</th>
+                                    <th>Minutes Late</th>
+                                </tr>
+                            </thead>
+                            <tbody id="lateEmployeesList">
+                                <!-- Late employees will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Absent Employees -->
+                    <div class="tab-pane fade" id="absentEmployees">
+                        <h3>Absent Employees</h3>
+                        <div class="alert alert-warning">
+                            Employees who didn't show up for work today
+                        </div>
+                        <div class="mb-3">
+                            <button class="btn btn-sm btn-warning" id="notifyAbsentEmployees">
+                                <i class="bi bi-bell-fill"></i> Notify Absent Employees
+                            </button>
+                            <button class="btn btn-sm btn-success ms-2" id="exportAbsentEmployees">
+                                <i class="bi bi-download"></i> Export as CSV
+                            </button>
+                            <button class="btn btn-sm btn-danger ms-2" id="printAbsentEmployees">
+                                <i class="bi bi-printer-fill"></i> Print
+                            </button>
+                        </div>
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Employee ID</th>
+                                    <th>Name</th>
+                                    <th>Shift</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="absentEmployeesList">
+                                <!-- Absent employees will be populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Leave/Rest Days -->
+                    <div class="tab-pane fade" id="leaveDays">
+                        <h3>Leave/Rest Days</h3>
+                        <form id="leaveForm">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="leaveEmpId" class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" id="leaveEmpId" required>
+                                    <div id="leaveEmployeeSuggestions" class="suggestions-dropdown"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="leaveType" class="form-label">Type</label>
+                                    <select class="form-select" id="leaveType" required>
+                                        <option value="">Select Type</option>
+                                        <option value="paid_leave">Paid Leave</option>
+                                        <option value="rest_day">Rest Day</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="leaveStartDate" class="form-label">Start Date</label>
+                                    <input type="date" class="form-control" id="leaveStartDate" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="leaveEndDate" class="form-label">End Date</label>
+                                    <input type="date" class="form-control" id="leaveEndDate" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Leave/Rest Days</button>
+                        </form>
+                        <div class="mt-4">
+                            <div class="mb-3">
+                                <button class="btn btn-sm btn-success" id="exportLeaveDays">
+                                    <i class="bi bi-download"></i> Export as CSV
+                                </button>
+                                <button class="btn btn-sm btn-danger ms-2" id="printLeaveDays">
+                                    <i class="bi bi-printer-fill"></i> Print
+                                </button>
+                            </div>
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Employee ID</th>
+                                        <th>Name</th>
+                                        <th>Type</th>
+                                        <th>Start Date</th>
+                                        <th>End Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="leaveDaysList">
+                                    <!-- Leave/rest days will be populated here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Salary Calculation -->
+                    <div class="tab-pane fade" id="salaryCalc">
+                        <h3>Salary Calculation</h3>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="salaryEmpId" class="form-label">Employee ID</label>
+                                <input type="text" class="form-control" id="salaryEmpId">
+                                <div id="salaryEmployeeSuggestions" class="suggestions-dropdown"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="calcMonth" class="form-label">Month</label>
+                                <input type="month" class="form-control" id="calcMonth">
+                            </div>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="emergencyCalc">
+                            <label class="form-check-label" for="emergencyCalc">Emergency Calculation (override payment day)</label>
+                        </div>
+                        <button id="calculateSalaryBtn" class="btn btn-primary">Calculate Salary</button>
+                        
+                        <div id="salaryResult" class="mt-4 p-3 bg-light rounded d-none">
+                            <div class="mb-3">
+                                <button class="btn btn-sm btn-success" id="exportSalary">
+                                    <i class="bi bi-download"></i> Export as PDF
+                                </button>
+                                <button class="btn btn-sm btn-danger ms-2" id="printSalary">
+                                    <i class="bi bi-printer-fill"></i> Print
+                                </button>
+                            </div>
+                            <h4>Salary Details</h4>
+                            <div id="salaryDetails"></div>
+                        </div>
+                    </div>
+
+                    <!-- Search Employees -->
+                    <div class="tab-pane fade" id="search">
+                        <h3>Search Employees</h3>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <input type="text" class="form-control" id="searchTerm" placeholder="Search by ID or Name">
+                                <div id="searchSuggestions" class="suggestions-dropdown"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <button id="searchBtn" class="btn btn-primary">Search</button>
+                                <button id="exportAllEmployees" class="btn btn-success ms-2">
+                                    <i class="bi bi-download"></i> Export All
+                                </button>
+                            </div>
+                        </div>
+                        <div id="searchResults" class="mt-3">
+                            <!-- Search results will appear here -->
+                        </div>
+                    </div>
+
+                    <!-- Deregister Employee -->
+                    <div class="tab-pane fade" id="deregister">
+                        <h3>Deregister Employee</h3>
+                        <div class="alert alert-danger">
+                            This action will mark the employee as "fired" in the system. Their records will be kept but they will no longer be active.
+                        </div>
+                        <form id="deregisterForm">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="deregisterEmpId" class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" id="deregisterEmpId" required>
+                                    <div id="deregisterEmployeeSuggestions" class="suggestions-dropdown"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="deregisterReason" class="form-label">Reason</label>
+                                    <input type="text" class="form-control" id="deregisterReason" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-danger">Deregister Employee</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Employee Details Modal -->
+    <div class="modal fade" id="employeeModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="employeeModalTitle">Employee Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="employeeModalBody">
+                    <!-- Employee details will be loaded here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="saveEmployeeChanges">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deduction Modal -->
+    <div class="modal fade" id="deductionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Deduction</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="deductionForm">
+                        <input type="hidden" id="deductionEmpId">
+                        <div class="mb-3">
+                            <label for="deductionDescription" class="form-label">Description</label>
+                            <input type="text" class="form-control" id="deductionDescription" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="deductionAmount" class="form-label">Amount (Ksh)</label>
+                            <input type="number" class="form-control" id="deductionAmount" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Deduction</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chatbot Interface -->
+    <div class="chatbot-container">
+        <button class="btn btn-primary chatbot-toggle">
+            <i class="bi bi-robot"></i> Help Bot
+        </button>
+        <div class="chatbot-window">
+            <div class="chatbot-header">
+                <h5>Employee Help Bot</h5>
+                <button class="btn btn-sm btn-close chatbot-close" data-bs-dismiss="chatbot-window"></button>
+            </div>
+            <div class="chatbot-messages" id="chatbotMessages">
+                <div class="chatbot-message bot-message">
+                    Hello! I'm your employee help assistant. How can I help you today?
+                </div>
+            </div>
+            <div class="chatbot-input">
+                <input type="text" id="chatbotQuery" placeholder="Ask about employees...">
+                <button class="btn btn-sm btn-primary" id="sendChatbotQuery">
+                    <i class="bi bi-send-fill"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Install App Prompt -->
+    <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+        <div id="installPrompt" class="toast d-none" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <strong class="me-auto">Install App</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                Add Bamburi Tilapia Hotel to your home screen for easy access!
+                <button id="installButton" class="btn btn-primary btn-sm mt-2">Install</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="management.js"></script>
+    <script>
+        // Register service worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').then(registration => {
+                    console.log('ServiceWorker registration successful');
+                }).catch(err => {
+                    console.log('ServiceWorker registration failed: ', err);
+                });
+            });
+        }
+
+        // Show install prompt
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            const installPrompt = new bootstrap.Toast(document.getElementById('installPrompt'));
+            installPrompt.show();
+        });
+
+        document.getElementById('installButton').addEventListener('click', () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    if (choiceResult.outcome === 'accepted') {
+                        console.log('User accepted install prompt');
+                    } else {
+                        console.log('User dismissed install prompt');
+                    }
+                    deferredPrompt = null;
+                });
+            }
+        });
+    </script>
+</body>
+</html>
