@@ -1,8 +1,72 @@
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: #f8f9fa;
+    transition: background-color 0.3s, color 0.3s;
 }
 
+/* Dark mode styles */
+body.dark-mode {
+    background-color: #121212;
+    color: #f8f9fa;
+}
+
+body.dark-mode .tab-content,
+body.dark-mode .card,
+body.dark-mode .modal-content {
+    background-color: #1e1e1e;
+    color: #f8f9fa;
+    border-color: #444;
+}
+
+body.dark-mode .table {
+    color: #f8f9fa;
+}
+
+body.dark-mode .table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+body.dark-mode .form-control,
+body.dark-mode .form-select,
+body.dark-mode .input-group-text {
+    background-color: #2d2d2d;
+    color: #f8f9fa;
+    border-color: #444;
+}
+
+body.dark-mode .list-group-item {
+    background-color: #1e1e1e;
+    color: #f8f9fa;
+    border-color: #444;
+}
+
+body.dark-mode .list-group-item.active {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+body.dark-mode .alert-info {
+    background-color: #0c5460;
+    border-color: #0b4e59;
+    color: #d1ecf1;
+}
+
+body.dark-mode .chatbot-window {
+    background-color: #2d2d2d;
+    color: #f8f9fa;
+}
+
+body.dark-mode .chatbot-message.bot-message {
+    background-color: #3e3e3e;
+}
+
+body.dark-mode .chatbot-input input {
+    background-color: #2d2d2d;
+    color: #f8f9fa;
+    border-color: #444;
+}
+
+/* Rest of your existing CSS remains the same */
 header {
     border-radius: 5px;
 }
@@ -93,6 +157,22 @@ header {
 
 .chatbot-window.show {
     display: flex;
+}
+
+/* Dark mode adjustments for chatbot */
+body.dark-mode .chatbot-window {
+    background-color: #2d2d2d;
+    color: #f8f9fa;
+}
+
+body.dark-mode .chatbot-message.bot-message {
+    background-color: #3e3e3e;
+}
+
+body.dark-mode .chatbot-input input {
+    background-color: #2d2d2d;
+    color: #f8f9fa;
+    border-color: #444;
 }
 
 .chatbot-header {
@@ -195,4 +275,194 @@ header {
     .col-md-3, .col-md-9 {
         width: 100%;
     }
+}
+
+/* Card styles */
+.card {
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card-header {
+    font-weight: bold;
+}
+
+/* Action buttons */
+.action-buttons .btn {
+    margin-right: 5px;
+    margin-bottom: 5px;
+}
+
+/* Status badges */
+.status-badge {
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.status-paid {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-pending {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.status-overdue {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+/* Summary cards */
+.summary-card {
+    border-left: 4px solid;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+}
+
+.summary-card.total {
+    border-left-color: #0d6efd;
+    background-color: #e7f1ff;
+}
+
+.summary-card.paid {
+    border-left-color: #28a745;
+    background-color: #e6f7eb;
+}
+
+.summary-card.pending {
+    border-left-color: #ffc107;
+    background-color: #fff8e6;
+}
+
+.summary-card h5 {
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+}
+
+.summary-card .amount {
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+/* Table actions */
+.table-actions {
+    white-space: nowrap;
+}
+
+.table-actions .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+/* Keyboard shortcut hint */
+.keyboard-shortcut {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-left: 5px;
+}
+
+/* Trend chart container */
+.chart-container {
+    position: relative;
+    height: 300px;
+    width: 100%;
+}
+
+/* Dark mode toggle switch */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: #2196F3;
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+/* Sync status indicators */
+.sync-status {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+
+.sync-status.synced {
+    background-color: #28a745;
+}
+
+.sync-status.pending {
+    background-color: #ffc107;
+}
+
+.sync-status.failed {
+    background-color: #dc3545;
+}
+
+/* Loading spinner */
+.loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255,255,255,.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Ensure the button is always enabled */
+#fetchRecordsBtn {
+    pointer-events: auto;
+    opacity: 1;
+}
+
+/* Remove any disabled styling */
+#fetchRecordsBtn:disabled {
+    opacity: 1;
+    cursor: pointer;
 }
