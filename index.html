@@ -9,21 +9,32 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="manifest" href="manifest.json">
-    <!-- PWA Meta Tags -->
-<link rel="manifest" href="/BT-management-System/manifest.json">
-<meta name="theme-color" content="#0d6efd">
-
-<!-- iOS Support -->
-<link rel="apple-touch-icon" href="/BT-management-System/icons/icon-192x192.png">
-<meta name="apple-mobile-web-app-status-bar" content="#0d6efd">
-<meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="stylesheet" href="management.css">
+    <!-- Include LZ-String for data compression -->
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
+    <!-- Include Supabase client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
-<body>
+<body class="light-mode">
     <div class="container-fluid">
         <header class="bg-primary text-white p-3 mb-4">
-            <h1>Bamburi Tilapia Hotel</h1>
-            <h2>Employee Management System</h2>
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1>Bamburi Tilapia Hotel</h1>
+                    <h2>Employee Management System</h2>
+                </div>
+                <div>
+                    <button id="toggleDarkMode" class="btn btn-sm btn-light">
+                        <i class="bi bi-moon-fill"></i> Dark Mode
+                    </button>
+                    <button id="syncData" class="btn btn-sm btn-light ms-2">
+                        <i class="bi bi-cloud-arrow-up-fill"></i> Sync Data
+                    </button>
+                    <span id="connectionStatus" class="badge bg-success ms-2">
+                        <i class="bi bi-wifi"></i> Online
+                    </span>
+                </div>
+            </div>
         </header>
 
         <div class="row">
@@ -36,8 +47,12 @@
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#absentEmployees">Absent Employees</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#leaveDays">Leave/Rest Days</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#salaryCalc">Salary Calculation</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#salaryReports">Salary Reports</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#employeeRecords">Employee Records</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#search">Search Employees</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#deregister">Deregister Employee</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#bulkActions">Bulk Actions</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#settings">Settings</button>
                 </div>
             </div>
 
@@ -50,9 +65,10 @@
                         <form id="employeeForm">
                             <div class="row mb-3">
                                 <div class="col-md-6">
-                                    <label for="empId" class="form-label">Employee ID</label>
-                                    <input type="text" class="form-control" id="empId" required>
-                                </div>
+                                  <label for="empId" class="form-label">Employee ID</label>
+                                  <input type="text" class="form-control" id="empId" pattern="[A-Za-z0-9\-_@#$%&*!?+=() ]+" required>
+                                  <small class="text-muted">Can contain letters, numbers, and special characters</small>
+                                 </div>
                                 <div class="col-md-6">
                                     <label for="fullName" class="form-label">Full Name</label>
                                     <input type="text" class="form-control" id="fullName" required>
@@ -87,6 +103,26 @@
                                     <label for="paymentDay" class="form-label">Payment Day of Month</label>
                                     <input type="number" class="form-control" id="paymentDay" min="1" max="31" required>
                                 </div>
+                                <div class="col-md-6">
+                                    <label for="department" class="form-label">Department</label>
+                                    <select class="form-select" id="department" required>
+                                        <option value="kitchen">Kitchen</option>
+                                        <option value="service">Service</option>
+                                        <option value="management">Management</option>
+                                        <option value="housekeeping">Housekeeping</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="email" class="form-label">Email (optional)</label>
+                                    <input type="email" class="form-control" id="email">
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="photo" class="form-label">Photo (optional)</label>
+                                    <input type="file" class="form-control" id="photo" accept="image/*">
+                                </div>
                             </div>
                             <button type="submit" class="btn btn-primary">Register Employee</button>
                         </form>
@@ -95,6 +131,15 @@
                     <!-- Attendance -->
                     <div class="tab-pane fade" id="attendance">
                         <h3>Record Attendance</h3>
+                        <div class="alert alert-info">
+                            <strong>Quick Actions:</strong>
+                            <button class="btn btn-sm btn-success ms-2" id="markAllPresent">
+                                <i class="bi bi-check-circle-fill"></i> Mark All Present Today
+                            </button>
+                            <button class="btn btn-sm btn-warning ms-2" id="markAllLate">
+                                <i class="bi bi-exclamation-triangle-fill"></i> Mark All Late Today
+                            </button>
+                        </div>
                         <form id="attendanceForm">
                             <div class="row mb-3">
                                 <div class="col-md-6">
@@ -124,6 +169,23 @@
                             <button type="submit" class="btn btn-primary">Record Attendance</button>
                         </form>
                         <div class="mt-4" id="attendanceStatus"></div>
+
+
+                        <div class="row mb-3">
+    <div class="col-md-4">
+        <label for="departureTime" class="form-label">Departure Time</label>
+        <input type="time" class="form-control" id="departureTime">
+    </div>
+    <div class="col-md-4">
+        <label for="approvedOvertime" class="form-label">Approved Overtime (mins)</label>
+        <input type="number" class="form-control" id="approvedOvertime" min="0" value="0">
+    </div>
+    <div class="col-md-4">
+        <label for="overstayMinutes" class="form-label">Overstay Minutes</label>
+        <input type="number" class="form-control" id="overstayMinutes" readonly>
+    </div>
+</div>
+
                     </div>
 
                     <!-- Late Employees -->
@@ -142,6 +204,9 @@
                             <button class="btn btn-sm btn-danger ms-2" id="printLateEmployees">
                                 <i class="bi bi-printer-fill"></i> Print
                             </button>
+                            <button class="btn btn-sm btn-info ms-2" id="viewLateTrends">
+                                <i class="bi bi-graph-up"></i> View Trends
+                            </button>
                         </div>
                         <table class="table table-striped">
                             <thead>
@@ -151,6 +216,7 @@
                                     <th>Shift</th>
                                     <th>Arrival Time</th>
                                     <th>Minutes Late</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="lateEmployeesList">
@@ -175,6 +241,9 @@
                             <button class="btn btn-sm btn-danger ms-2" id="printAbsentEmployees">
                                 <i class="bi bi-printer-fill"></i> Print
                             </button>
+                            <button class="btn btn-sm btn-info ms-2" id="viewAbsentTrends">
+                                <i class="bi bi-graph-up"></i> View Trends
+                            </button>
                         </div>
                         <table class="table table-striped">
                             <thead>
@@ -182,7 +251,7 @@
                                     <th>Employee ID</th>
                                     <th>Name</th>
                                     <th>Shift</th>
-                                    <th>Action</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="absentEmployeesList">
@@ -207,6 +276,9 @@
                                         <option value="">Select Type</option>
                                         <option value="paid_leave">Paid Leave</option>
                                         <option value="rest_day">Rest Day</option>
+                                        <option value="sick_leave">Sick Leave</option>
+                                        <option value="maternity_leave">Maternity Leave</option>
+                                        <option value="paternity_leave">Paternity Leave</option>
                                     </select>
                                 </div>
                             </div>
@@ -218,6 +290,12 @@
                                 <div class="col-md-6">
                                     <label for="leaveEndDate" class="form-label">End Date</label>
                                     <input type="date" class="form-control" id="leaveEndDate" required>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <label for="leaveReason" class="form-label">Reason (optional)</label>
+                                    <textarea class="form-control" id="leaveReason" rows="2"></textarea>
                                 </div>
                             </div>
                             <button type="submit" class="btn btn-primary">Add Leave/Rest Days</button>
@@ -239,6 +317,7 @@
                                         <th>Type</th>
                                         <th>Start Date</th>
                                         <th>End Date</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="leaveDaysList">
@@ -266,7 +345,11 @@
                             <input type="checkbox" class="form-check-input" id="emergencyCalc">
                             <label class="form-check-label" for="emergencyCalc">Emergency Calculation (override payment day)</label>
                         </div>
-                        <button id="calculateSalaryBtn" class="btn btn-primary">Calculate Salary</button>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="includeBonus">
+                            <label class="form-check-label" for="includeBonus">Include Performance Bonus</label>
+                        </div>
+                        <button id="calculateSalaryBtn" class="btn btn-primary" onclick="handleSalaryCalculation()">Calculate Salary</button>
                         
                         <div id="salaryResult" class="mt-4 p-3 bg-light rounded d-none">
                             <div class="mb-3">
@@ -276,9 +359,114 @@
                                 <button class="btn btn-sm btn-danger ms-2" id="printSalary">
                                     <i class="bi bi-printer-fill"></i> Print
                                 </button>
+                                <button class="btn btn-sm btn-info ms-2" id="sendSalarySlip">
+                                    <i class="bi bi-envelope-fill"></i> Email Payslip
+                                </button>
                             </div>
                             <h4>Salary Details</h4>
                             <div id="salaryDetails"></div>
+                        </div>
+                    </div>
+
+                    <!-- Salary Reports -->
+                    <div class="tab-pane fade" id="salaryReports">
+                        <h3>Salary Reports</h3>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="reportMonth" class="form-label">Select Month</label>
+                                <input type="month" class="form-control" id="reportMonth">
+                            </div>
+                            <div class="col-md-6">
+                                <button id="generateReportBtn" class="btn btn-primary mt-4" onclick="generateSalaryReport()">Generate Report</button>
+                                <button id="exportFullReport" class="btn btn-success mt-4 ms-2" onclick="exportSalaryReport()">
+                                    <i class="bi bi-download"></i> Export Full Report
+                                </button>
+                                 <button id="printFullReport" class="btn btn-danger mt-4 ms-2" onclick="printSalaryReport()">
+                                    <i class="bi bi-printer-fill"></i> Print
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Salary Summary</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="salarySummary">
+                                            <p>Select a month and generate report to view data</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Pending Payments</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="pendingPayments">
+                                            <p>Select a month and generate report to view data</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0">Detailed Salary Report</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-striped" id="detailedReportTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Employee ID</th>
+                                                <th>Name</th>
+                                                <th>Base Salary</th>
+                                                <th>Deductions</th>
+                                                <th>Net Salary</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="detailedReportBody">
+                                            <!-- Will be populated by JavaScript -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Employee Records -->
+                    <div class="tab-pane fade" id="employeeRecords">
+                        <h3>Employee Records</h3>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="recordEmpId" class="form-label">Employee ID</label>
+                                <input type="text" class="form-control" id="recordEmpId">
+                                <div id="recordEmployeeSuggestions" class="suggestions-dropdown"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <button id="fetchRecordsBtn" class="btn btn-primary mt-4" onclick="fetchEmployeeRecords()">Fetch Records</button>
+                                <button id="exportEmployeeRecords" class="btn btn-success mt-4 ms-2" onclick="exportEmployeeRecords()">
+                                    <i class="bi bi-download"></i> Export as PDF
+                                </button>
+                                <button id="printEmployeeRecord" class="btn btn-danger mt-4 ms-2" onclick="printEmployeeRecord()">
+                                    <i class="bi bi-printer-fill"></i> Print
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0">Employee Records</h5>
+                            </div>
+                            <div class="card-body" id="employeeRecordsBody">
+                                <p>Enter employee ID and click "Fetch Records" to view data</p>
+                            </div>
                         </div>
                     </div>
 
@@ -294,6 +482,9 @@
                                 <button id="searchBtn" class="btn btn-primary">Search</button>
                                 <button id="exportAllEmployees" class="btn btn-success ms-2">
                                     <i class="bi bi-download"></i> Export All
+                                </button>
+                                <button id="printEmployeeDirectory" class="btn btn-danger ms-2">
+                                    <i class="bi bi-printer-fill"></i> Print Directory
                                 </button>
                             </div>
                         </div>
@@ -317,11 +508,181 @@
                                 </div>
                                 <div class="col-md-6">
                                     <label for="deregisterReason" class="form-label">Reason</label>
-                                    <input type="text" class="form-control" id="deregisterReason" required>
+                                    <select class="form-select" id="deregisterReason" required>
+                                        <option value="">Select Reason</option>
+                                        <option value="resignation">Resignation</option>
+                                        <option value="termination">Termination</option>
+                                        <option value="retirement">Retirement</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <label for="deregisterNotes" class="form-label">Notes (optional)</label>
+                                    <textarea class="form-control" id="deregisterNotes" rows="3"></textarea>
                                 </div>
                             </div>
                             <button type="submit" class="btn btn-danger">Deregister Employee</button>
                         </form>
+                    </div>
+
+                    <!-- Bulk Actions -->
+                    <div class="tab-pane fade" id="bulkActions">
+                        <h3>Bulk Actions</h3>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Import Employees</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="importFile" class="form-label">Select CSV File</label>
+                                            <input class="form-control" type="file" id="importFile" accept=".csv">
+                                        </div>
+                                        <div class="mb-3">
+                                            <button id="importEmployeesBtn" class="btn btn-primary">
+                                                <i class="bi bi-upload"></i> Import Employees
+                                            </button>
+                                            <a href="#" id="downloadTemplate" class="btn btn-link">
+                                                <i class="bi bi-download"></i> Download Template
+                                            </a>
+                                        </div>
+                                        <div id="importStatus" class="alert alert-info d-none"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Bulk Attendance</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="bulkAttendanceDate" class="form-label">Date</label>
+                                            <input type="date" class="form-control" id="bulkAttendanceDate">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="bulkAttendanceFile" class="form-label">Select CSV File</label>
+                                            <input class="form-control" type="file" id="bulkAttendanceFile" accept=".csv">
+                                        </div>
+                                        <button id="processBulkAttendanceBtn" class="btn btn-primary">
+                                            <i class="bi bi-upload"></i> Process Bulk Attendance
+                                        </button>
+                                        <div id="bulkAttendanceStatus" class="alert alert-info mt-3 d-none"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Settings -->
+                    <div class="tab-pane fade" id="settings">
+                        <h3>System Settings</h3>
+                        <div class="row">
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">Database Settings (MySQL)</h5>
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label for="dbHost" class="form-label">Host</label>
+                <input type="text" class="form-control" id="dbHost" placeholder="localhost">
+            </div>
+            <div class="col-md-6">
+                <label for="dbPort" class="form-label">Port</label>
+                <input type="number" class="form-control" id="dbPort" placeholder="3306" value="3306">
+            </div>
+        </div>
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label for="dbUser" class="form-label">Username</label>
+                <input type="text" class="form-control" id="dbUser" placeholder="username">
+            </div>
+            <div class="col-md-6">
+                <label for="dbPassword" class="form-label">Password</label>
+                <input type="password" class="form-control" id="dbPassword" placeholder="password">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label for="dbName" class="form-label">Database Name</label>
+            <input type="text" class="form-control" id="dbName" placeholder="employee_db">
+        </div>
+        <button id="saveDbSettings" class="btn btn-primary">
+            <i class="bi bi-save"></i> Save Database Settings
+        </button>
+        <button id="testDbConnection" class="btn btn-secondary ms-2">
+            <i class="bi bi-plug"></i> Test Connection
+        </button>
+        <div id="dbConnectionStatus" class="alert mt-3 d-none"></div>
+    </div>
+</div>
+                            <div class="col-md-6">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Notification Settings</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="enableNotifications">
+                                            <label class="form-check-label" for="enableNotifications">Enable Browser Notifications</label>
+                                        </div>
+                                        <div class="mb-3 form-check">
+                                            <input type="checkbox" class="form-check-input" id="enableEmailNotifications">
+                                            <label class="form-check-label" for="enableEmailNotifications">Enable Email Notifications</label>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="notificationEmail" class="form-label">Notification Email</label>
+                                            <input type="email" class="form-control" id="notificationEmail">
+                                        </div>
+                                        <button id="saveNotificationSettings" class="btn btn-primary">
+                                            <i class="bi bi-save"></i> Save Settings
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0">Data Management</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="alert alert-warning">
+                                    <strong>Warning:</strong> These actions cannot be undone. Backup your data before proceeding.
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <button id="backupDataBtn" class="btn btn-success w-100 mb-2">
+                                            <i class="bi bi-cloud-upload"></i> Backup to Cloud
+                                        </button>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button id="restoreDataBtn" class="btn btn-info w-100 mb-2">
+                                            <i class="bi bi-cloud-download"></i> Restore from Cloud
+                                        </button>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button id="clearDataBtn" class="btn btn-danger w-100 mb-2">
+                                            <i class="bi bi-trash"></i> Clear Local Data
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="row mt-3">
+                                    <div class="col-md-6">
+                                        <button id="exportAllDataBtn" class="btn btn-secondary w-100">
+                                            <i class="bi bi-download"></i> Export All Data
+                                        </button>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <button id="importAllDataBtn" class="btn btn-secondary w-100">
+                                            <i class="bi bi-upload"></i> Import All Data
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -366,6 +727,10 @@
                             <label for="deductionAmount" class="form-label">Amount (Ksh)</label>
                             <input type="number" class="form-control" id="deductionAmount" required>
                         </div>
+                        <div class="mb-3">
+                            <label for="deductionDate" class="form-label">Date</label>
+                            <input type="date" class="form-control" id="deductionDate" required>
+                        </div>
                         <button type="submit" class="btn btn-primary">Add Deduction</button>
                     </form>
                 </div>
@@ -373,29 +738,168 @@
         </div>
     </div>
 
-    <!-- Chatbot Interface -->
-    <div class="chatbot-container">
-        <button class="btn btn-primary chatbot-toggle">
-            <i class="bi bi-robot"></i> Help Bot
-        </button>
-        <div class="chatbot-window">
-            <div class="chatbot-header">
-                <h5>Employee Help Bot</h5>
-                <button class="btn btn-sm btn-close chatbot-close" data-bs-dismiss="chatbot-window"></button>
-            </div>
-            <div class="chatbot-messages" id="chatbotMessages">
-                <div class="chatbot-message bot-message">
-                    Hello! I'm your employee help assistant. How can I help you today?
+    <!-- Edit Attendance Modal -->
+    <div class="modal fade" id="editAttendanceModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Attendance Record</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-            </div>
-            <div class="chatbot-input">
-                <input type="text" id="chatbotQuery" placeholder="Ask about employees...">
-                <button class="btn btn-sm btn-primary" id="sendChatbotQuery">
-                    <i class="bi bi-send-fill"></i>
-                </button>
+                <div class="modal-body">
+                    <form id="editAttendanceForm">
+                        <input type="hidden" id="editAttendanceId">
+                        <div class="mb-3">
+                            <label for="editAttendanceDate" class="form-label">Date</label>
+                            <input type="date" class="form-control" id="editAttendanceDate" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editArrivalTime" class="form-label">Arrival Time</label>
+                            <input type="time" class="form-control" id="editArrivalTime" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editShiftType" class="form-label">Shift Type</label>
+                            <select class="form-select" id="editShiftType" required>
+                                <option value="day">Day Shift</option>
+                                <option value="night">Night Shift</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <button type="button" class="btn btn-danger ms-2" id="deleteAttendanceBtn">Delete Record</button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- Edit Leave Modal -->
+    <div class="modal fade" id="editLeaveModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Leave Record</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editLeaveForm">
+                        <input type="hidden" id="editLeaveId">
+                        <div class="mb-3">
+                            <label for="editLeaveType" class="form-label">Type</label>
+                            <select class="form-select" id="editLeaveType" required>
+                                <option value="paid_leave">Paid Leave</option>
+                                <option value="rest_day">Rest Day</option>
+                                <option value="sick_leave">Sick Leave</option>
+                                <option value="maternity_leave">Maternity Leave</option>
+                                <option value="paternity_leave">Paternity Leave</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editLeaveStartDate" class="form-label">Start Date</label>
+                            <input type="date" class="form-control" id="editLeaveStartDate" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editLeaveEndDate" class="form-label">End Date</label>
+                            <input type="date" class="form-control" id="editLeaveEndDate" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editLeaveReason" class="form-label">Reason</label>
+                            <textarea class="form-control" id="editLeaveReason" rows="2"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <button type="button" class="btn btn-danger ms-2" id="deleteLeaveBtn">Delete Record</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Deduction Modal -->
+    <div class="modal fade" id="editDeductionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Deduction</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editDeductionForm">
+                        <input type="hidden" id="editDeductionId">
+                        <div class="mb-3">
+                            <label for="editDeductionDescription" class="form-label">Description</label>
+                            <input type="text" class="form-control" id="editDeductionDescription" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editDeductionAmount" class="form-label">Amount (Ksh)</label>
+                            <input type="number" class="form-control" id="editDeductionAmount" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editDeductionDate" class="form-label">Date</label>
+                            <input type="date" class="form-control" id="editDeductionDate" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <button type="button" class="btn btn-danger ms-2" id="deleteDeductionBtn">Delete Deduction</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trend Graph Modal -->
+    <div class="modal fade" id="trendModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="trendModalTitle">Attendance Trends</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="trendStartDate" class="form-label">Start Date</label>
+                            <input type="date" class="form-control" id="trendStartDate">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="trendEndDate" class="form-label">End Date</label>
+                            <input type="date" class="form-control" id="trendEndDate">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <button id="generateTrendBtn" class="btn btn-primary">Generate Trend</button>
+                        <button id="exportTrendBtn" class="btn btn-success ms-2">Export as Image</button>
+                    </div>
+                    <canvas id="trendChart" width="400" height="200"></canvas>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chatbot Interface -->
+    <div class="chatbot-container">
+    <button class="btn btn-primary chatbot-toggle" id="chatbotToggle">
+        <i class="bi bi-robot"></i> Help Bot
+    </button>
+        <div class="chatbot-window">
+        <div class="chatbot-window" id="chatbotWindow">
+        <div class="chatbot-header">
+            <h5>Employee Help Bot</h5>
+            <button class="btn btn-sm btn-close chatbot-close" id="chatbotClose" ></button>
+        </div>
+        <div class="chatbot-messages" id="chatbotMessages">
+            <div class="chatbot-message bot-message">
+                Hello! I'm your employee help assistant. How can I help you today?
+            </div>
+        </div>
+        <div class="chatbot-input">
+            <input type="text" id="chatbotQuery" placeholder="Ask about employees...">
+            <button class="btn btn-sm btn-primary" id="sendChatbotQuery">
+                <i class="bi bi-send-fill"></i>
+            </button>
+        </div>
+    </div>
+</div>
 
     <!-- Install App Prompt -->
     <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
@@ -411,9 +915,21 @@
         </div>
     </div>
 
+    <!-- Offline Alert -->
+    <div id="offlineAlert" class="alert alert-warning position-fixed top-0 start-0 w-100 text-center d-none" style="z-index: 1100;">
+        <strong>Offline Mode:</strong> You are currently offline. Changes will be synced when connection is restored.
+    </div>
+
+    <!-- Sync Queue Alert -->
+    <div id="syncQueueAlert" class="alert alert-info position-fixed top-0 start-0 w-100 text-center d-none" style="z-index: 1100;">
+        <strong>Pending Sync:</strong> <span id="syncQueueCount">0</span> changes waiting to be synced.
+        <button id="retrySyncBtn" class="btn btn-sm btn-primary ms-2">Retry Now</button>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="management.js"></script>
     <script>
         // Register service worker for PWA
@@ -449,6 +965,27 @@
                 });
             }
         });
+
+        // Check online status
+        function updateOnlineStatus() {
+            const isOnline = navigator.onLine;
+            const connectionStatus = document.getElementById('connectionStatus');
+            const offlineAlert = document.getElementById('offlineAlert');
+            
+            if (isOnline) {
+                connectionStatus.className = 'badge bg-success ms-2';
+                connectionStatus.innerHTML = '<i class="bi bi-wifi"></i> Online';
+                offlineAlert.classList.add('d-none');
+            } else {
+                connectionStatus.className = 'badge bg-danger ms-2';
+                connectionStatus.innerHTML = '<i class="bi bi-wifi-off"></i> Offline';
+                offlineAlert.classList.remove('d-none');
+            }
+        }
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        updateOnlineStatus();
     </script>
 </body>
 </html>
