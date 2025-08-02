@@ -1,14 +1,9 @@
-// Initialize Supabase client with better error handling
-let MySQL;
-// API Configuration
-const API_BASE_URL = 'http://your-api-domain.com/api';
-let authToken = localStorage.getItem('authToken') || '';
-
-// Employee data structure (will be populated from API)
+// Employee data structure (will be stored in localStorage)
 let employees = [];
 let attendanceRecords = [];
 let leaveRecords = [];
 let deductions = [];
+let salaryRecords = []; // Added for salary tracking
 let settings = {
     enableNotifications: true,
     enableEmailNotifications: false,
@@ -17,116 +12,16 @@ let settings = {
     deductionRate: 0.5 // Ksh per minute for overstay deductions
 };
 
-// Queue for pending sync operations
-let syncQueue = [];
-let isSyncing = false;
-
-async function initializeData() {
-    try {
-        // Load settings from localStorage
-        const savedSettings = localStorage.getItem('settings');
-        if (savedSettings) {
-            settings = JSON.parse(savedSettings);
-            applySettings();
-        }
-
-        // Fetch all data from API if authenticated
-        if (authToken) {
-            await Promise.all([
-                fetchEmployees(),
-                fetchAttendanceRecords(),
-                fetchLeaveRecords(),
-                fetchDeductions()
-            ]);
-        }
-    } catch (error) {
-        console.error('Error initializing data:', error);
-        showAlert('Error loading data', 'error');
-    }
-}
-
-// API Helper Functions
-async function apiRequest(endpoint, method = 'GET', body = null) {
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`
-    };
-
-    const config = {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : null
-    };
-
-    try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-        
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || 'API request failed');
-        }
-
-        return await response.json();
-    } catch (error) {
-        console.error(`API request error (${endpoint}):`, error);
-        throw error;
-    }
-}
-
-// Test database connection
-async function testMySQLConnection() {
-    const host = getElement('dbHost')?.value || 'localhost';
-    const port = getElement('dbPort')?.value || 3306;
-    const user = getElement('dbUser')?.value;
-    const password = getElement('dbPassword')?.value;
-    const database = getElement('dbName')?.value || 'employee_db';
-    
-    if (!user || !password) {
-        showAlert('Please enter both username and password', 'error');
-        return;
-    }
-    
-    const statusDiv = getElement('dbConnectionStatus');
-    if (!statusDiv) return;
-    
-    try {
-        statusDiv.className = 'alert alert-info mt-3';
-        statusDiv.innerHTML = '<i class="bi bi-hourglass"></i> Testing connection...';
-        statusDiv.classList.remove('d-none');
-        
-        const dbConfig = { host, port, user, password, database };
-        const result = await apiRequest('/database/connect', 'POST', dbConfig);
-        
-        if (result.connected) {
-            statusDiv.className = 'alert alert-success mt-3';
-            statusDiv.innerHTML = '<i class="bi bi-check-circle"></i> Connection successful!';
-            
-            // Save the credentials
-            localStorage.setItem('dbHost', host);
-            localStorage.setItem('dbPort', port);
-            localStorage.setItem('dbUser', user);
-            localStorage.setItem('dbPassword', password);
-            localStorage.setItem('dbName', database);
-            
-            // Store the auth token if provided
-            if (result.token) {
-                authToken = result.token;
-                localStorage.setItem('authToken', authToken);
-            }
-        } else {
-            throw new Error(result.message || 'Connection failed');
-        }
-    } catch (error) {
-        console.error('Connection test failed:', error);
-        statusDiv.className = 'alert alert-danger mt-3';
-        statusDiv.innerHTML = `<i class="bi bi-x-circle"></i> Connection failed: ${error.message || 'Unknown error'}`;
-    }
+// Helper function to replace getElement (fixes "getElement is not defined" error)
+function getElement(id) {
+    return document.getElementById(id);
 }
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
-    initializeData();
+    loadData();
     setupEventListeners();
+    updateStorageInfo();
     
     // Set default dates
     const today = new Date().toISOString().split('T')[0];
@@ -137,155 +32,141 @@ document.addEventListener('DOMContentLoaded', function() {
     updateLateEmployeesList();
     updateAbsentEmployeesList();
     updateLeaveDaysList();
+    updateSalaryReports();
 });
 
-
-
-// Database Connection Functions
-async function testDatabaseConnection(dbConfig) {
+// Load data from localStorage
+function loadData() {
     try {
-        const response = await apiRequest('/database/test-connection', 'POST', dbConfig);
-        return response.connected;
-    } catch (error) {
-        console.error('Database connection test failed:', error);
-        throw error;
-    }
-}
-
-// Data Fetching Functions
-async function fetchEmployees() {
-    try {
-        const data = await apiRequest('/employees');
-        employees = data;
-        return employees;
-    } catch (error) {
-        console.error('Error fetching employees:', error);
-        throw error;
-    }
-}
-
-async function fetchAttendanceRecords() {
-    try {
-        const data = await apiRequest('/attendance');
-        attendanceRecords = data;
-        return attendanceRecords;
-    } catch (error) {
-        console.error('Error fetching attendance records:', error);
-        throw error;
-    }
-}
-
-async function fetchLeaveRecords() {
-    try {
-        const data = await apiRequest('/leaves');
-        leaveRecords = data;
-        return leaveRecords;
-    } catch (error) {
-        console.error('Error fetching leave records:', error);
-        throw error;
-    }
-}
-
-async function fetchDeductions() {
-    try {
-        const data = await apiRequest('/deductions');
-        deductions = data;
-        return deductions;
-    } catch (error) {
-        console.error('Error fetching deductions:', error);
-        throw error;
-    }
-}
-
-// Data Saving Functions
-async function saveEmployee(employee) {
-    try {
-        const endpoint = employee.id ? `/employees/${employee.id}` : '/employees';
-        const method = employee.id ? 'PUT' : 'POST';
-        
-        const savedEmployee = await apiRequest(endpoint, method, employee);
-        
-        // Update local cache
-        const index = employees.findIndex(e => e.id === savedEmployee.id);
-        if (index >= 0) {
-            employees[index] = savedEmployee;
-        } else {
-            employees.push(savedEmployee);
+        // Load employees
+        const compressedEmployees = localStorage.getItem('employees');
+        if (compressedEmployees) {
+            const decompressed = LZString.decompress(compressedEmployees);
+            employees = JSON.parse(decompressed) || [];
         }
         
-        return savedEmployee;
-    } catch (error) {
-        console.error('Error saving employee:', error);
-        throw error;
-    }
-}
-
-async function saveAttendanceRecord(record) {
-    try {
-        const endpoint = record.id ? `/attendance/${record.id}` : '/attendance';
-        const method = record.id ? 'PUT' : 'POST';
-        
-        const savedRecord = await apiRequest(endpoint, method, record);
-        
-        // Update local cache
-        const index = attendanceRecords.findIndex(a => a.id === savedRecord.id);
-        if (index >= 0) {
-            attendanceRecords[index] = savedRecord;
-        } else {
-            attendanceRecords.push(savedRecord);
+        // Load attendance
+        const compressedAttendance = localStorage.getItem('attendance');
+        if (compressedAttendance) {
+            const decompressed = LZString.decompress(compressedAttendance);
+            attendanceRecords = JSON.parse(decompressed) || [];
         }
         
-        return savedRecord;
-    } catch (error) {
-        console.error('Error saving attendance record:', error);
-        throw error;
-    }
-}
-
-async function saveLeaveRecord(record) {
-    try {
-        const endpoint = record.id ? `/leaves/${record.id}` : '/leaves';
-        const method = record.id ? 'PUT' : 'POST';
-        
-        const savedRecord = await apiRequest(endpoint, method, record);
-        
-        // Update local cache
-        const index = leaveRecords.findIndex(l => l.id === savedRecord.id);
-        if (index >= 0) {
-            leaveRecords[index] = savedRecord;
-        } else {
-            leaveRecords.push(savedRecord);
+        // Load leave records
+        const compressedLeaves = localStorage.getItem('leaveRecords');
+        if (compressedLeaves) {
+            const decompressed = LZString.decompress(compressedLeaves);
+            leaveRecords = JSON.parse(decompressed) || [];
         }
         
-        return savedRecord;
-    } catch (error) {
-        console.error('Error saving leave record:', error);
-        throw error;
-    }
-}
-
-async function saveDeduction(deduction) {
-    try {
-        const endpoint = deduction.id ? `/deductions/${deduction.id}` : '/deductions';
-        const method = deduction.id ? 'PUT' : 'POST';
-        
-        const savedDeduction = await apiRequest(endpoint, method, deduction);
-        
-        // Update local cache
-        const index = deductions.findIndex(d => d.id === savedDeduction.id);
-        if (index >= 0) {
-            deductions[index] = savedDeduction;
-        } else {
-            deductions.push(savedDeduction);
+        // Load deductions
+        const compressedDeductions = localStorage.getItem('deductions');
+        if (compressedDeductions) {
+            const decompressed = LZString.decompress(compressedDeductions);
+            deductions = JSON.parse(decompressed) || [];
         }
         
-        return savedDeduction;
+        // Load salary records
+        const compressedSalaries = localStorage.getItem('salaryRecords');
+        if (compressedSalaries) {
+            const decompressed = LZString.decompress(compressedSalaries);
+            salaryRecords = JSON.parse(decompressed) || [];
+        }
+        
+        // Load settings
+        const savedSettings = localStorage.getItem('settings');
+        if (savedSettings) {
+            settings = JSON.parse(savedSettings);
+            applySettings();
+        }
     } catch (error) {
-        console.error('Error saving deduction:', error);
-        throw error;
+        console.error('Error loading data:', error);
+        showAlert('Error loading data. Some data may be lost.', 'error');
     }
 }
 
+// Save data to localStorage with compression
+function saveData() {
+    try {
+        // Compress data before saving
+        localStorage.setItem('employees', LZString.compress(JSON.stringify(employees)));
+        localStorage.setItem('attendance', LZString.compress(JSON.stringify(attendanceRecords)));
+        localStorage.setItem('leaveRecords', LZString.compress(JSON.stringify(leaveRecords)));
+        localStorage.setItem('deductions', LZString.compress(JSON.stringify(deductions)));
+        localStorage.setItem('salaryRecords', LZString.compress(JSON.stringify(salaryRecords)));
+        localStorage.setItem('settings', JSON.stringify(settings));
+        
+        updateStorageInfo();
+    } catch (error) {
+        console.error('Error saving data:', error);
+        showAlert('Failed to save data. Please check storage space.', 'error');
+        
+        // If localStorage is full, try to clear some space
+        if (error.name === 'QuotaExceededError') {
+            handleLocalStorageFull();
+        }
+    }
+}
+
+// Handle localStorage full error
+function handleLocalStorageFull() {
+    try {
+        // Clear old attendance records (keep last 3 months)
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        
+        attendanceRecords = attendanceRecords.filter(record => {
+            const recordDate = new Date(record.date);
+            return recordDate >= threeMonthsAgo;
+        });
+        
+        // Try saving again
+        saveData();
+        showAlert('Cleared old records to free up space. Please try again.', 'warning');
+    } catch (error) {
+        console.error('Error handling full localStorage:', error);
+        showAlert('Local storage is full and cleanup failed. Some data may not be saved.', 'error');
+    }
+}
+
+// Update storage information in settings panel
+function updateStorageInfo() {
+    try {
+        // Calculate total used space
+        let totalUsed = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            const value = localStorage.getItem(key);
+            totalUsed += key.length + value.length;
+        }
+        
+        // Convert to KB
+        const usedKB = (totalUsed / 1024).toFixed(2);
+        const totalKB = (5 * 1024).toFixed(2); // Assuming 5MB limit
+        const remainingKB = (5 * 1024 - totalUsed / 1024).toFixed(2);
+        
+        // Update UI
+        const usagePercentage = (totalUsed / (5 * 1024 * 1024)) * 100;
+        getElement('storageUsageBar').style.width = `${usagePercentage}%`;
+        getElement('storageUsed').textContent = `${usedKB} KB used`;
+        getElement('storageRemaining').textContent = `${remainingKB} KB remaining`;
+        
+        // Update progress bar color based on usage
+        const progressBar = getElement('storageUsageBar');
+        if (usagePercentage > 90) {
+            progressBar.classList.add('bg-danger');
+            progressBar.classList.remove('bg-warning', 'bg-success');
+        } else if (usagePercentage > 70) {
+            progressBar.classList.add('bg-warning');
+            progressBar.classList.remove('bg-danger', 'bg-success');
+        } else {
+            progressBar.classList.add('bg-success');
+            progressBar.classList.remove('bg-danger', 'bg-warning');
+        }
+    } catch (error) {
+        console.error('Error updating storage info:', error);
+    }
+}
 
 // Apply settings to the UI
 function applySettings() {
@@ -293,18 +174,18 @@ function applySettings() {
         // Apply dark mode
         if (settings.darkMode) {
             document.body.classList.add('dark-mode');
-            const darkModeBtn = document.getElementById('toggleDarkMode');
+            const darkModeBtn = getElement('toggleDarkMode');
             if (darkModeBtn) darkModeBtn.innerHTML = '<i class="bi bi-sun-fill"></i> Light Mode';
         } else {
             document.body.classList.remove('dark-mode');
-            const darkModeBtn = document.getElementById('toggleDarkMode');
+            const darkModeBtn = getElement('toggleDarkMode');
             if (darkModeBtn) darkModeBtn.innerHTML = '<i class="bi bi-moon-fill"></i> Dark Mode';
         }
         
         // Apply notification settings
-        const notificationsCheckbox = document.getElementById('enableNotifications');
-        const emailNotificationsCheckbox = document.getElementById('enableEmailNotifications');
-        const notificationEmailInput = document.getElementById('notificationEmail');
+        const notificationsCheckbox = getElement('enableNotifications');
+        const emailNotificationsCheckbox = getElement('enableEmailNotifications');
+        const notificationEmailInput = getElement('notificationEmail');
         
         if (notificationsCheckbox) notificationsCheckbox.checked = settings.enableNotifications;
         if (emailNotificationsCheckbox) emailNotificationsCheckbox.checked = settings.enableEmailNotifications;
@@ -314,33 +195,7 @@ function applySettings() {
     }
 }
 
-// DOM Elements with null checks and memoization
-const elementCache = {};
-function getElement(id) {
-    if (elementCache[id]) return elementCache[id];
-    
-    const element = document.getElementById(id);
-    if (!element) {
-        console.error(`Element with ID ${id} not found`);
-        return null;
-    }
-    
-    elementCache[id] = element;
-    return element;
-}
-
-// Utility functions with improved error handling
-function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-    try {
-        const options = { year: 'numeric', month: 'long', day: 'numeric' };
-        return new Date(dateString).toLocaleDateString(undefined, options);
-    } catch (error) {
-        console.error('Error formatting date:', error);
-        return dateString; // Return raw string if formatting fails
-    }
-}
-
+// Utility functions
 function showAlert(message, type = 'success') {
     try {
         const alertTypes = {
@@ -357,13 +212,13 @@ function showAlert(message, type = 'success') {
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         `;
         
-        const alertsContainer = document.getElementById('alertsContainer') || document.body;
+        const alertsContainer = getElement('alertsContainer') || document.body;
         alertsContainer.prepend(alertDiv);
         
         // Auto-dismiss after 5 seconds
         setTimeout(() => {
             try {
-                const bsAlert = new bootstrap.Alert(alertDiv);
+                const bsAlert = bootstrap.Alert.getOrCreateInstance(alertDiv);
                 bsAlert.close();
             } catch (error) {
                 console.error('Error dismissing alert:', error);
@@ -375,424 +230,29 @@ function showAlert(message, type = 'success') {
     }
 }
 
-function validateEmployeeData(employee) {
-    if (!employee.id || !employee.name) {
-        throw new Error('Employee ID and Name are required');
-    }
-    
-    // Updated ID validation to allow special characters and spaces
-    if (!/^[A-Za-z0-9\-_@#$%&* ]+$/.test(employee.id)) {
-        throw new Error('Employee ID can contain alphanumeric characters, spaces, and special characters (-_@#$%&*)');
-    }
-    
-    if (employee.workingDays < 1 || employee.workingDays > 31) {
-        throw new Error('Working days must be between 1 and 31');
-    }
-    
-    if (employee.salary <= 0) {
-        throw new Error('Salary must be a positive number');
-    }
-    
-    if (employee.paymentDay < 1 || employee.paymentDay > 31) {
-        throw new Error('Payment day must be between 1 and 31');
-    }
-    
-    return true;
-}
-
-// Save data to localStorage with compression and better error handling
-function saveToLocalStorage() {
+function formatDate(dateString) {
+    if (!dateString) return 'N/A';
     try {
-        // Compress data before saving to localStorage
-        localStorage.setItem('employees', LZString.compress(JSON.stringify(employees)));
-        localStorage.setItem('attendance', LZString.compress(JSON.stringify(attendanceRecords)));
-        localStorage.setItem('leaveRecords', LZString.compress(JSON.stringify(leaveRecords)));
-        localStorage.setItem('deductions', LZString.compress(JSON.stringify(deductions)));
-        localStorage.setItem('settings', JSON.stringify(settings));
-        localStorage.setItem('syncQueue', JSON.stringify(syncQueue));
-        
-        // If online and Supabase is connected, try to sync
-        if (navigator.onLine && supabase) {
-            syncWithSupabase();
-        }
+        const options = { year: 'numeric', month: 'long', day: 'numeric' };
+        return new Date(dateString).toLocaleDateString(undefined, options);
     } catch (error) {
-        console.error('Error saving to localStorage:', error);
-        showAlert('Failed to save data. Please check console for details.', 'error');
-        
-        // If localStorage is full, try to clear some space
-        if (error.name === 'QuotaExceededError') {
-            handleLocalStorageFull();
-        }
+        console.error('Error formatting date:', error);
+        return dateString; // Return raw string if formatting fails
     }
 }
 
-function handleLocalStorageFull() {
+function formatDateShort(dateString) {
+    if (!dateString) return 'N/A';
     try {
-        // Clear old attendance records (keep last 3 months)
-        const threeMonthsAgo = new Date();
-        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-        
-        attendanceRecords = attendanceRecords.filter(record => {
-            const recordDate = new Date(record.date);
-            return recordDate >= threeMonthsAgo;
-        });
-        
-        // Try saving again
-        saveToLocalStorage();
-        showAlert('Cleared old records to free up space. Please try again.', 'warning');
+        const options = { year: 'numeric', month: 'short', day: 'numeric' };
+        return new Date(dateString).toLocaleDateString(undefined, options);
     } catch (error) {
-        console.error('Error handling full localStorage:', error);
-        showAlert('Local storage is full and cleanup failed. Some data may not be saved.', 'error');
+        console.error('Error formatting date:', error);
+        return dateString;
     }
 }
 
-// Enhanced sync functions with better error recovery
-async function syncWithSupabase() {
-    if (!supabase || isSyncing) return;
-    
-    isSyncing = true;
-    const syncStartTime = Date.now();
-    showAlert('Starting data sync with database...', 'info');
-    
-    try {
-        // Sync employees in batches to avoid timeouts
-        const batchSize = 50;
-        for (let i = 0; i < employees.length; i += batchSize) {
-            const batch = employees.slice(i, i + batchSize);
-            const { error: empError } = await supabase
-                .from('employees')
-                .upsert(batch, { onConflict: 'id' });
-            
-            if (empError) throw empError;
-        }
-        
-        // Sync attendance in batches
-        for (let i = 0; i < attendanceRecords.length; i += batchSize) {
-            const batch = attendanceRecords.slice(i, i + batchSize);
-            const { error: attError } = await supabase
-                .from('attendance')
-                .upsert(batch);
-            
-            if (attError) throw attError;
-        }
-        
-        // Sync leave records
-        for (let i = 0; i < leaveRecords.length; i += batchSize) {
-            const batch = leaveRecords.slice(i, i + batchSize);
-            const { error: leaveError } = await supabase
-                .from('leave_records')
-                .upsert(batch);
-            
-            if (leaveError) throw leaveError;
-        }
-        
-        // Sync deductions
-        for (let i = 0; i < deductions.length; i += batchSize) {
-            const batch = deductions.slice(i, i + batchSize);
-            const { error: dedError } = await supabase
-                .from('deductions')
-                .upsert(batch);
-            
-            if (dedError) throw dedError;
-        }
-        
-        const syncTime = ((Date.now() - syncStartTime) / 1000).toFixed(1);
-        console.log(`Data synced successfully with Supabase in ${syncTime} seconds`);
-        showAlert(`Data synced successfully with database (${syncTime}s)`);
-    } catch (error) {
-        console.error('Error syncing with Supabase:', error);
-        
-        // Add to sync queue to retry later
-        syncQueue.push({
-            type: 'full_sync',
-            timestamp: new Date().toISOString(),
-            attempt: (syncQueue[0]?.attempt || 0) + 1
-        });
-        
-        updateSyncQueueAlert();
-        
-        // If this is the first failure, retry immediately
-        if (syncQueue.length === 1 && syncQueue[0].attempt === 1) {
-            setTimeout(processSyncQueue, 5000); // Retry after 5 seconds
-        } else {
-            showAlert('Sync failed. Changes will be synced when back online.', 'error');
-        }
-    } finally {
-        isSyncing = false;
-    }
-}
-
-// Process sync queue with exponential backoff
-async function processSyncQueue() {
-    if (!navigator.onLine || !supabase || isSyncing || syncQueue.length === 0) return;
-    
-    isSyncing = true;
-    showAlert('Processing pending sync operations...', 'info');
-    
-    try {
-        // Process each item in the queue
-        while (syncQueue.length > 0) {
-            const operation = syncQueue[0];
-            const lastAttempt = operation.lastAttempt || 0;
-            const attempt = operation.attempt || 1;
-            
-            // If this operation failed recently, wait before retrying
-            if (Date.now() - lastAttempt < Math.min(60000, 5000 * Math.pow(2, attempt - 1))) {
-                break;
-            }
-            
-            try {
-                let result;
-                
-                switch (operation.type) {
-                    case 'add_employee':
-                        result = await supabase
-                            .from('employees')
-                            .insert(operation.data);
-                        break;
-                        
-                    case 'update_employee':
-                        result = await supabase
-                            .from('employees')
-                            .update(operation.data)
-                            .eq('id', operation.employeeId);
-                        break;
-                        
-                    case 'add_attendance':
-                        result = await supabase
-                            .from('attendance')
-                            .insert(operation.data);
-                        break;
-                        
-                    case 'update_attendance':
-                        result = await supabase
-                            .from('attendance')
-                            .update(operation.data)
-                            .eq('empId', operation.data.empId)
-                            .eq('date', operation.data.date);
-                        break;
-                        
-                    case 'delete_attendance':
-                        result = await supabase
-                            .from('attendance')
-                            .delete()
-                            .eq('empId', operation.data.empId)
-                            .eq('date', operation.data.date);
-                        break;
-                        
-                    case 'add_leave':
-                        result = await supabase
-                            .from('leave_records')
-                            .insert(operation.data);
-                        break;
-                        
-                    case 'update_leave':
-                        result = await supabase
-                            .from('leave_records')
-                            .update(operation.data)
-                            .eq('empId', operation.data.empId)
-                            .eq('startDate', operation.data.startDate);
-                        break;
-                        
-                    case 'delete_leave':
-                        result = await supabase
-                            .from('leave_records')
-                            .delete()
-                            .eq('empId', operation.data.empId)
-                            .eq('startDate', operation.data.startDate);
-                        break;
-                        
-                    case 'add_deduction':
-                        result = await supabase
-                            .from('deductions')
-                            .insert(operation.data);
-                        break;
-                        
-                    case 'update_deduction':
-                        result = await supabase
-                            .from('deductions')
-                            .update(operation.data)
-                            .eq('id', operation.data.id);
-                        break;
-                        
-                    case 'delete_deduction':
-                        result = await supabase
-                            .from('deductions')
-                            .delete()
-                            .eq('id', operation.data.id);
-                        break;
-                        
-                    case 'full_sync':
-                        await syncWithSupabase();
-                        result = { error: null };
-                        break;
-                }
-                
-                if (result && result.error) throw result.error;
-                
-                // Remove successfully processed operation from queue
-                syncQueue.shift();
-                localStorage.setItem('syncQueue', JSON.stringify(syncQueue));
-                updateSyncQueueAlert();
-            } catch (error) {
-                console.error(`Failed to process sync operation: ${operation.type}`, error);
-                
-                // Update attempt count and last attempt time
-                operation.attempt = (operation.attempt || 0) + 1;
-                operation.lastAttempt = Date.now();
-                operation.lastError = error.message;
-                
-                localStorage.setItem('syncQueue', JSON.stringify(syncQueue));
-                updateSyncQueueAlert();
-                
-                // If we've tried this operation too many times, give up
-                if (operation.attempt >= 5) {
-                    syncQueue.shift();
-                    localStorage.setItem('syncQueue', JSON.stringify(syncQueue));
-                    updateSyncQueueAlert();
-                    showAlert(`Failed to sync operation after 5 attempts: ${operation.type}`, 'error');
-                }
-                
-                break;
-            }
-        }
-    } finally {
-        isSyncing = false;
-    }
-}
-
-// Update sync queue alert with more detailed information
-function updateSyncQueueAlert() {
-    const alert = document.getElementById('syncQueueAlert');
-    const countSpan = document.getElementById('syncQueueCount');
-    const detailsBtn = document.getElementById('syncQueueDetails');
-    
-    if (!alert || !countSpan) return;
-    
-    if (syncQueue.length > 0) {
-        alert.classList.remove('d-none');
-        countSpan.textContent = syncQueue.length;
-        
-        if (detailsBtn) {
-            detailsBtn.onclick = function() {
-                showSyncQueueDetails();
-            };
-        }
-    } else {
-        alert.classList.add('d-none');
-    }
-}
-
-function showSyncQueueDetails() {
-    const modal = new bootstrap.Modal(getElement('syncQueueModal'));
-    const modalBody = getElement('syncQueueModalBody');
-    
-    if (!modalBody) return;
-    
-    let html = '<div class="table-responsive"><table class="table table-sm">';
-    html += `
-        <thead>
-            <tr>
-                <th>Type</th>
-                <th>Attempts</th>
-                <th>Last Attempt</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-    `;
-    
-    syncQueue.forEach(op => {
-        html += `
-            <tr>
-                <td>${op.type}</td>
-                <td>${op.attempt || 1}</td>
-                <td>${op.lastAttempt ? new Date(op.lastAttempt).toLocaleString() : 'Not attempted'}</td>
-                <td>${op.lastError ? `<span class="text-danger">Failed: ${op.lastError}</span>` : 'Pending'}</td>
-            </tr>
-        `;
-    });
-    
-    html += '</tbody></table></div>';
-    modalBody.innerHTML = html;
-    modal.show();
-}
-
-// Initialize the application with better error handling
-document.addEventListener('DOMContentLoaded', function() {
-    try {
-        initializeData();
-        
-        // Set up event listeners
-        setupEventListeners();
-        
-        // Initialize UI components
-        updateLateEmployeesList();
-        updateAbsentEmployeesList();
-        updateLeaveDaysList();
-        
-        // Set default date to today for attendance
-        const attendanceDate = getElement('attendanceDate');
-        if (attendanceDate) {
-            attendanceDate.valueAsDate = new Date();
-        }
-        
-        // Initialize search suggestions with debounce
-        initSearchSuggestions();
-        
-        // Initialize chatbot if elements exist
-        if (getElement('chatbotToggle') && getElement('chatbotWindow')) {
-            initChatbot();
-        }
-        
-        // Check for late employees every minute
-        setInterval(checkLateEmployees, 60000);
-        checkLateEmployees();
-        
-        // Set up keyboard shortcuts
-        setupKeyboardShortcuts();
-        
-        // Check if we need to show any pending sync alerts
-        updateSyncQueueAlert();
-        
-        // Initialize tooltips
-        $('[data-bs-toggle="tooltip"]').tooltip();
-        
-    } catch (error) {
-        console.error('Initialization error:', error);
-        showAlert('Failed to initialize application. Please check console for details.', 'error');
-    }
-});
-
-// Set up keyboard shortcuts
-function setupKeyboardShortcuts() {
-    document.addEventListener('keydown', function(e) {
-        // Ctrl+F to focus search
-        if (e.ctrlKey && e.key === 'f') {
-            e.preventDefault();
-            const searchInput = getElement('searchTerm');
-            if (searchInput) {
-                searchInput.focus();
-            }
-        }
-        
-        // Ctrl+S to sync data
-        if (e.ctrlKey && e.key === 's') {
-            e.preventDefault();
-            const syncBtn = getElement('syncData');
-            if (syncBtn) syncBtn.click();
-        }
-        
-        // Ctrl+D to toggle dark mode
-        if (e.ctrlKey && e.key === 'd') {
-            e.preventDefault();
-            const darkModeBtn = getElement('toggleDarkMode');
-            if (darkModeBtn) darkModeBtn.click();
-        }
-    });
-}
-
-// Enhanced event listeners setup
+// Set up event listeners
 function setupEventListeners() {
     // Register new employee
     const employeeForm = getElement('employeeForm');
@@ -804,6 +264,19 @@ function setupEventListeners() {
     const attendanceForm = getElement('attendanceForm');
     if (attendanceForm) {
         attendanceForm.addEventListener('submit', handleAttendanceRecording);
+        
+        // Calculate overstay minutes when departure time changes
+        const departureTime = getElement('departureTime');
+        const approvedOvertime = getElement('approvedOvertime');
+        const shiftTypeAttendance = getElement('shiftTypeAttendance');
+        const attendanceDate = getElement('attendanceDate');
+        
+        if (departureTime && approvedOvertime && shiftTypeAttendance && attendanceDate) {
+            departureTime.addEventListener('change', calculateOverstayMinutes);
+            approvedOvertime.addEventListener('change', calculateOverstayMinutes);
+            shiftTypeAttendance.addEventListener('change', calculateOverstayMinutes);
+            attendanceDate.addEventListener('change', calculateOverstayMinutes);
+        }
     }
     
     // Add leave/rest days
@@ -812,19 +285,40 @@ function setupEventListeners() {
         leaveForm.addEventListener('submit', handleLeaveRecording);
     }
     
-    // Calculate salary - FIXED: Added proper event listener for salary calculation
-    const salaryCalcBtn = getElement('salaryCalcBtn');
+    // Calculate salary
+    const salaryCalcBtn = getElement('calculateSalaryBtn');
     if (salaryCalcBtn) {
-        salaryCalcBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            handleSalaryCalculation();
-        });
+        salaryCalcBtn.addEventListener('click', handleSalaryCalculation);
+    }
+    
+    // Generate salary report
+    const generateReportBtn = getElement('generateReportBtn');
+    if (generateReportBtn) {
+        generateReportBtn.addEventListener('click', generateSalaryReport);
+    }
+    
+    // Export salary report
+    const exportFullReport = getElement('exportFullReport');
+    if (exportFullReport) {
+        exportFullReport.addEventListener('click', exportSalaryReport);
+    }
+    
+    // Print salary report
+    const printFullReport = getElement('printFullReport');
+    if (printFullReport) {
+        printFullReport.addEventListener('click', printSalaryReport);
     }
     
     // Search employees
     const searchBtn = getElement('searchBtn');
     if (searchBtn) {
         searchBtn.addEventListener('click', handleEmployeeSearch);
+    }
+    
+    // Quick search functionality
+    const quickSearchInput = getElement('quickSearchInput');
+    if (quickSearchInput) {
+        quickSearchInput.addEventListener('input', handleQuickSearch);
     }
     
     // Deregister employee
@@ -839,6 +333,18 @@ function setupEventListeners() {
         saveEmployeeChanges.addEventListener('click', handleEmployeeUpdate);
     }
     
+    // Edit employee ID
+    const editEmployeeIdBtn = getElement('editEmployeeIdBtn');
+    if (editEmployeeIdBtn) {
+        editEmployeeIdBtn.addEventListener('click', showEditIdModal);
+    }
+    
+    // Save edited ID
+    const editIdForm = getElement('editIdForm');
+    if (editIdForm) {
+        editIdForm.addEventListener('submit', handleEditId);
+    }
+    
     // Add deduction
     const deductionForm = getElement('deductionForm');
     if (deductionForm) {
@@ -851,835 +357,206 @@ function setupEventListeners() {
         darkModeToggle.addEventListener('click', function() {
             settings.darkMode = !settings.darkMode;
             applySettings();
-            saveToLocalStorage();
-        });
-    }
-    
-    // Sync data button
-    const syncDataBtn = getElement('syncData');
-    if (syncDataBtn) {
-        syncDataBtn.addEventListener('click', function() {
-            if (navigator.onLine) {
-                if (syncQueue.length > 0) {
-                    processSyncQueue();
-                } else {
-                    syncWithSupabase();
-                }
-            } else {
-                showAlert('You are currently offline. Sync will happen automatically when connection is restored.', 'warning');
-            }
-        });
-    }
-    
-    // Retry sync button
-    const retrySyncBtn = getElement('retrySyncBtn');
-    if (retrySyncBtn) {
-        retrySyncBtn.addEventListener('click', function() {
-            if (navigator.onLine) {
-                processSyncQueue();
-            } else {
-                showAlert('You are currently offline. Please connect to the internet to sync data.', 'warning');
-            }
+            saveData();
         });
     }
     
     // Mark all present button
     const markAllPresentBtn = getElement('markAllPresent');
     if (markAllPresentBtn) {
-        markAllPresentBtn.addEventListener('click', function() {
-            markAllEmployeesPresent();
-        });
-    }
-    
-    // Save database settings
-    const saveDbSettingsBtn = getElement('saveDbSettings');
-    if (saveDbSettingsBtn) {
-        saveDbSettingsBtn.addEventListener('click', function() {
-            const url = getElement('supabaseUrl')?.value;
-            const key = getElement('supabaseKey')?.value;
-            
-            if (url && key) {
-                localStorage.setItem('supabaseUrl', url);
-                localStorage.setItem('supabaseKey', key);
-                showAlert('Database settings saved successfully!');
-                
-                // Reload the page to initialize new Supabase client
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showAlert('Please enter both Supabase URL and Key', 'error');
-            }
-        });
-    }
-    
-    // Test database connection
-    const testDbConnectionBtn = getElement('testDbConnection');
-    if (testDbConnectionBtn) {
-        testDbConnectionBtn.addEventListener('click', async function() {
-            const url = getElement('supabaseUrl')?.value;
-            const key = getElement('supabaseKey')?.value;
-            
-            if (!url || !key) {
-                showAlert('Please enter both Supabase URL and Key', 'error');
-                return;
-            }
-            
-            const testClient = createClient(url, key);
-            const statusDiv = getElement('dbConnectionStatus');
-            
-            if (!statusDiv) return;
-            
-            try {
-                statusDiv.className = 'alert alert-info mt-3';
-                statusDiv.innerHTML = '<i class="bi bi-hourglass"></i> Testing connection...';
-                statusDiv.classList.remove('d-none');
-                
-                // Test connection by fetching a single employee
-                const { data, error } = await testClient
-                    .from('employees')
-                    .select('*')
-                    .limit(1);
-                
-                if (error) throw error;
-                
-                statusDiv.className = 'alert alert-success mt-3';
-                statusDiv.innerHTML = '<i class="bi bi-check-circle"></i> Connection successful!';
-            } catch (error) {
-                console.error('Connection test failed:', error);
-                statusDiv.className = 'alert alert-danger mt-3';
-                statusDiv.innerHTML = `<i class="bi bi-x-circle"></i> Connection failed: ${error.message}`;
-            }
-        });
+        markAllPresentBtn.addEventListener('click', markAllEmployeesPresent);
     }
     
     // Save notification settings
     const saveNotificationSettingsBtn = getElement('saveNotificationSettings');
     if (saveNotificationSettingsBtn) {
         saveNotificationSettingsBtn.addEventListener('click', function() {
-            settings.enableNotifications = getElement('enableNotifications')?.checked || false;
-            settings.enableEmailNotifications = getElement('enableEmailNotifications')?.checked || false;
-            settings.notificationEmail = getElement('notificationEmail')?.value || '';
+            settings.enableNotifications = getElement('enableNotifications').checked || false;
+            settings.enableEmailNotifications = getElement('enableEmailNotifications').checked || false;
+            settings.notificationEmail = getElement('notificationEmail').value || '';
             
-            saveToLocalStorage();
+            saveData();
             showAlert('Notification settings saved successfully!');
         });
     }
     
-    // Backup data to cloud
-    const backupDataBtn = getElement('backupDataBtn');
-    if (backupDataBtn) {
-        backupDataBtn.addEventListener('click', async function() {
-            if (!navigator.onLine) {
-                showAlert('You need to be online to backup data to the cloud', 'error');
-                return;
-            }
-            
-            if (!supabase) {
-                showAlert('Please configure database settings first', 'error');
-                return;
-            }
-            
-            try {
-                const backupData = {
-                    employees: employees,
-                    attendance: attendanceRecords,
-                    leaveRecords: leaveRecords,
-                    deductions: deductions,
-                    settings: settings,
-                    timestamp: new Date().toISOString()
-                };
-                
-                const { data, error } = await supabase
-                    .from('backups')
-                    .insert([{
-                        backup_data: backupData,
-                        timestamp: new Date().toISOString()
-                    }]);
-                
-                if (error) throw error;
-                
-                showAlert('Data backed up to cloud successfully!');
-            } catch (error) {
-                console.error('Backup failed:', error);
-                showAlert(`Backup failed: ${error.message}`, 'error');
-            }
-        });
-    }
-    
-    // Restore data from cloud
-    const restoreDataBtn = getElement('restoreDataBtn');
-    if (restoreDataBtn) {
-        restoreDataBtn.addEventListener('click', async function() {
-            if (!navigator.onLine) {
-                showAlert('You need to be online to restore data from the cloud', 'error');
-                return;
-            }
-            
-            if (!supabase) {
-                showAlert('Please configure database settings first', 'error');
-                return;
-            }
-            
-            if (!confirm('This will overwrite all local data. Are you sure?')) {
-                return;
-            }
-            
-            try {
-                const { data, error } = await supabase
-                    .from('backups')
-                    .select('*')
-                    .order('timestamp', { ascending: false })
-                    .limit(1);
-                
-                if (error) throw error;
-                
-                if (data.length === 0) {
-                    showAlert('No backup found in the cloud', 'warning');
-                    return;
-                }
-                
-                const backup = data[0].backup_data;
-                
-                // Restore data
-                employees = backup.employees || [];
-                attendanceRecords = backup.attendance || [];
-                leaveRecords = backup.leaveRecords || [];
-                deductions = backup.deductions || [];
-                settings = backup.settings || {};
-                
-                // Save to localStorage
-                saveToLocalStorage();
-                applySettings();
-                
-                showAlert('Data restored from cloud successfully!');
+    // Clear storage button
+    const clearStorageBtn = getElement('clearStorageBtn');
+    if (clearStorageBtn) {
+        clearStorageBtn.addEventListener('click', function() {
+            if (confirm('This will delete ALL local data. Are you sure?')) {
+                localStorage.clear();
+                employees = [];
+                attendanceRecords = [];
+                leaveRecords = [];
+                deductions = [];
+                salaryRecords = [];
+                showAlert('All local data has been cleared', 'warning');
                 setTimeout(() => location.reload(), 1000);
-            } catch (error) {
-                console.error('Restore failed:', error);
-                showAlert(`Restore failed: ${error.message}`, 'error');
             }
         });
     }
     
-    // Clear local data
-    const clearDataBtn = getElement('clearDataBtn');
-    if (clearDataBtn) {
-        clearDataBtn.addEventListener('click', function() {
-            if (!confirm('This will delete ALL local data. Are you sure?')) {
-                return;
-            }
-            
-            localStorage.clear();
-            showAlert('All local data has been cleared', 'warning');
-            setTimeout(() => location.reload(), 1000);
-        });
+    // Export data button
+    const exportDataBtn = getElement('exportDataBtn');
+    if (exportDataBtn) {
+        exportDataBtn.addEventListener('click', exportAllData);
     }
     
-    // Export all data
-    const exportAllDataBtn = getElement('exportAllDataBtn');
-    if (exportAllDataBtn) {
-        exportAllDataBtn.addEventListener('click', function() {
-            const data = {
-                employees: employees,
-                attendance: attendanceRecords,
-                leaveRecords: leaveRecords,
-                deductions: deductions,
-                settings: settings,
-                timestamp: new Date().toISOString()
-            };
-            
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `employee_data_backup_${new Date().toISOString().split('T')[0]}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            showAlert('Data exported successfully!');
-        });
+    // Import data button
+    const importDataBtn = getElement('importDataBtn');
+    if (importDataBtn) {
+        importDataBtn.addEventListener('click', importData);
     }
     
-    // Import all data
-    const importAllDataBtn = getElement('importAllDataBtn');
-    if (importAllDataBtn) {
-        importAllDataBtn.addEventListener('click', function() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            
-            input.onchange = e => {
-                const file = e.target.files[0];
-                const reader = new FileReader();
-                
-                reader.onload = event => {
-                    try {
-                        const data = JSON.parse(event.target.result);
-                        
-                        if (!confirm('This will overwrite all current data. Are you sure?')) {
-                            return;
-                        }
-                        
-                        employees = data.employees || [];
-                        attendanceRecords = data.attendance || [];
-                        leaveRecords = data.leaveRecords || [];
-                        deductions = data.deductions || [];
-                        settings = data.settings || {};
-                        
-                        saveToLocalStorage();
-                        applySettings();
-                        
-                        showAlert('Data imported successfully!');
-                        setTimeout(() => location.reload(), 1000);
-                    } catch (error) {
-                        console.error('Import failed:', error);
-                        showAlert('Failed to import data. The file may be corrupted.', 'error');
-                    }
-                };
-                
-                reader.readAsText(file);
-            };
-            
-            input.click();
-        });
+    // Initialize search suggestions
+    initSearchSuggestions();
+    
+    // Initialize chatbot if elements exist
+    if (getElement('chatbotToggle') && getElement('chatbotWindow')) {
+        initChatbot();
     }
     
-    // Import employees from CSV
-    const importEmployeesBtn = getElement('importEmployeesBtn');
-    if (importEmployeesBtn) {
-        importEmployeesBtn.addEventListener('click', function() {
-            const fileInput = getElement('importFile');
-            if (!fileInput) return;
-            
-            const file = fileInput.files[0];
-            if (!file) {
-                showAlert('Please select a CSV file first', 'error');
-                return;
-            }
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const csvData = e.target.result;
-                    const lines = csvData.split('\n');
-                    const headers = lines[0].split(',').map(h => h.trim());
-                    
-                    // Required fields
-                    const requiredFields = ['id', 'name', 'shift', 'workingDays', 'salary', 'paymentDay'];
-                    const missingFields = requiredFields.filter(f => !headers.includes(f));
-                    
-                    if (missingFields.length > 0) {
-                        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
-                    }
-                    
-                    const statusDiv = getElement('importStatus');
-                    if (statusDiv) {
-                        statusDiv.classList.remove('d-none');
-                        statusDiv.className = 'alert alert-info';
-                        statusDiv.innerHTML = 'Processing CSV file...';
-                    }
-                    
-                    let importedCount = 0;
-                    let skippedCount = 0;
-                    
-                    // Process each line
-                    for (let i = 1; i < lines.length; i++) {
-                        if (!lines[i].trim()) continue;
-                        
-                        const values = lines[i].split(',');
-                        const employee = {};
-                        
-                        headers.forEach((header, index) => {
-                            employee[header] = values[index] ? values[index].trim() : '';
-                        });
-                        
-                        // Convert numeric fields
-                        employee.workingDays = parseInt(employee.workingDays) || 22;
-                        employee.salary = parseFloat(employee.salary) || 0;
-                        employee.paymentDay = parseInt(employee.paymentDay) || 1;
-                        
-                        // Set default status if not provided
-                        employee.status = employee.status || 'active';
-                        
-                        try {
-                            validateEmployeeData(employee);
-                            
-                            // Check if employee already exists
-                            const existingIndex = employees.findIndex(emp => emp.id === employee.id);
-                            if (existingIndex >= 0) {
-                                employees[existingIndex] = employee;
-                            } else {
-                                employees.push(employee);
-                            }
-                            
-                            importedCount++;
-                        } catch (error) {
-                            console.error(`Skipping row ${i + 1}: ${error.message}`);
-                            skippedCount++;
-                        }
-                    }
-                    
-                    saveToLocalStorage();
-                    
-                    if (statusDiv) {
-                        statusDiv.className = 'alert alert-success';
-                        statusDiv.innerHTML = `Successfully imported ${importedCount} employees. ${skippedCount} rows skipped.`;
-                    }
-                    
-                    showAlert(`Imported ${importedCount} employees from CSV`);
-                } catch (error) {
-                    console.error('CSV import failed:', error);
-                    showAlert(`CSV import failed: ${error.message}`, 'error');
-                    
-                    const statusDiv = getElement('importStatus');
-                    if (statusDiv) {
-                        statusDiv.className = 'alert alert-danger';
-                        statusDiv.innerHTML = `Import failed: ${error.message}`;
-                        statusDiv.classList.remove('d-none');
-                    }
-                }
-            };
-            
-            reader.readAsText(file);
-        });
+    // Check for late employees every minute
+    setInterval(checkLateEmployees, 60000);
+    checkLateEmployees();
+    
+    // Export all employees button
+    const exportAllEmployeesBtn = getElement('exportAllEmployees');
+    if (exportAllEmployeesBtn) {
+        exportAllEmployeesBtn.addEventListener('click', exportAllEmployees);
     }
     
-    // Download CSV template
-    const downloadTemplateBtn = getElement('downloadTemplate');
-    if (downloadTemplateBtn) {
-        downloadTemplateBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            
-            const headers = ['id', 'name', 'phone', 'email', 'shift', 'workingDays', 'salary', 'paymentDay', 'department', 'status'];
-            const csvContent = headers.join(',') + '\n' +
-                'EMP001,John Doe,0712345678,john@example.com,day,22,25000,5,kitchen,active\n' +
-                'EMP002,Jane Smith,0723456789,jane@example.com,night,22,28000,5,service,active';
-            
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'employee_import_template.csv';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            showAlert('Template downloaded successfully!');
-        });
+    // Print directory button
+    const printDirectoryBtn = getElement('printDirectory');
+    if (printDirectoryBtn) {
+        printDirectoryBtn.addEventListener('click', printEmployeeDirectory);
     }
     
-    // Process bulk attendance
-    const processBulkAttendanceBtn = getElement('processBulkAttendanceBtn');
-    if (processBulkAttendanceBtn) {
-        processBulkAttendanceBtn.addEventListener('click', function() {
-            const fileInput = getElement('bulkAttendanceFile');
-            const dateInput = getElement('bulkAttendanceDate');
-            if (!fileInput || !dateInput) return;
-            
-            const file = fileInput.files[0];
-            const date = dateInput.value;
-            
-            if (!file) {
-                showAlert('Please select a CSV file first', 'error');
-                return;
-            }
-            
-            if (!date) {
-                showAlert('Please select a date first', 'error');
-                return;
-            }
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const csvData = e.target.result;
-                    const lines = csvData.split('\n');
-                    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-                    
-                    // Required fields
-                    const requiredFields = ['employeeid', 'arrivaltime', 'shifttype'];
-                    const missingFields = requiredFields.filter(f => !headers.includes(f));
-                    
-                    if (missingFields.length > 0) {
-                        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
-                    }
-                    
-                    const statusDiv = getElement('bulkAttendanceStatus');
-                    if (statusDiv) {
-                        statusDiv.classList.remove('d-none');
-                        statusDiv.className = 'alert alert-info';
-                        statusDiv.innerHTML = 'Processing bulk attendance...';
-                    }
-                    
-                    let processedCount = 0;
-                    let skippedCount = 0;
-                    
-                    // Process each line
-                    for (let i = 1; i < lines.length; i++) {
-                        if (!lines[i].trim()) continue;
-                        
-                        const values = lines[i].split(',');
-                        const record = { date: date };
-                        
-                        headers.forEach((header, index) => {
-                            record[header] = values[index] ? values[index].trim() : '';
-                        });
-                        
-                        // Rename fields to match our data structure
-                        record.empId = record.employeeid;
-                        record.arrivalTime = record.arrivaltime;
-                        record.shiftType = record.shifttype;
-                        
-                        // Calculate if late
-                        const arrivalDateTime = new Date(`${date}T${record.arrivalTime}`);
-                        let expectedTime, minutesLate = 0;
-                        let status = 'on_time';
-                        
-                        if (record.shiftType === 'day') {
-                            expectedTime = new Date(`${date}T09:30:00`);
-                        } else {
-                            expectedTime = new Date(`${date}T21:30:00`);
-                        }
-                        
-                        if (arrivalDateTime > expectedTime) {
-                            minutesLate = Math.round((arrivalDateTime - expectedTime) / (1000 * 60));
-                            status = 'late';
-                        }
-                        
-                        record.status = status;
-                        record.minutesLate = minutesLate;
-                        
-                        try {
-                            // Check if employee exists
-                            const employee = employees.find(emp => emp.id === record.empId);
-                            if (!employee) {
-                                throw new Error(`Employee ${record.empId} not found`);
-                            }
-                            
-                            // Check if attendance already recorded for this date
-                            const existingIndex = attendanceRecords.findIndex(att => 
-                                att.empId === record.empId && att.date === date
-                            );
-                            
-                            if (existingIndex >= 0) {
-                                attendanceRecords[existingIndex] = record;
-                            } else {
-                                attendanceRecords.push(record);
-                            }
-                            
-                            processedCount++;
-                        } catch (error) {
-                            console.error(`Skipping row ${i + 1}: ${error.message}`);
-                            skippedCount++;
-                        }
-                    }
-                    
-                    saveToLocalStorage();
-                    
-                    if (statusDiv) {
-                        statusDiv.className = 'alert alert-success';
-                        statusDiv.innerHTML = `Processed ${processedCount} attendance records. ${skippedCount} rows skipped.`;
-                    }
-                    
-                    showAlert(`Processed ${processedCount} attendance records from CSV`);
-                    updateLateEmployeesList();
-                    updateAbsentEmployeesList();
-                } catch (error) {
-                    console.error('Bulk attendance processing failed:', error);
-                    showAlert(`Bulk attendance processing failed: ${error.message}`, 'error');
-                    
-                    const statusDiv = getElement('bulkAttendanceStatus');
-                    if (statusDiv) {
-                        statusDiv.className = 'alert alert-danger';
-                        statusDiv.innerHTML = `Processing failed: ${error.message}`;
-                        statusDiv.classList.remove('d-none');
-                    }
-                }
-            };
-            
-            reader.readAsText(file);
-        });
+    // Email payslip button
+    const emailPayslipBtn = getElement('emailPayslipBtn');
+    if (emailPayslipBtn) {
+        emailPayslipBtn.addEventListener('click', emailPayslip);
     }
     
-    // View late trends
-    const viewLateTrendsBtn = getElement('viewLateTrends');
-    if (viewLateTrendsBtn) {
-        viewLateTrendsBtn.addEventListener('click', function() {
-            showTrendChart('late');
-        });
+    // Export payslip button
+    const exportPayslipBtn = getElement('exportPayslipBtn');
+    if (exportPayslipBtn) {
+        exportPayslipBtn.addEventListener('click', exportPayslip);
     }
     
-    // View absent trends
-    const viewAbsentTrendsBtn = getElement('viewAbsentTrends');
-    if (viewAbsentTrendsBtn) {
-        viewAbsentTrendsBtn.addEventListener('click', function() {
-            showTrendChart('absent');
-        });
+    // Print payslip button
+    const printPayslipBtn = getElement('printPayslipBtn');
+    if (printPayslipBtn) {
+        printPayslipBtn.addEventListener('click', printPayslip);
     }
 }
 
-// Enhanced show trend chart function
-function showTrendChart(type) {
-    const modal = new bootstrap.Modal(getElement('trendModal'));
-    const title = getElement('trendModalTitle');
-    const ctx = getElement('trendChart')?.getContext('2d');
+// Quick search functionality
+function handleQuickSearch() {
+    const searchTerm = getElement('quickSearchInput').value.toLowerCase();
+    if (!searchTerm) return;
+
+    const results = employees.filter(emp => 
+        emp.id.toLowerCase().includes(searchTerm) || 
+        emp.name.toLowerCase().includes(searchTerm)
+    );
+
+    const quickResultsDiv = getElement('quickSearchResults');
+    if (!quickResultsDiv) return;
+
+    quickResultsDiv.innerHTML = '';
+
+    if (results.length === 0) {
+        quickResultsDiv.innerHTML = '<div class="alert alert-info">No employees found</div>';
+        return;
+    }
+
+    results.forEach(emp => {
+        const empCard = document.createElement('div');
+        empCard.className = 'card mb-2';
+        empCard.innerHTML = `
+            <div class="card-body">
+                <h5 class="card-title">${emp.name}</h5>
+                <h6 class="card-subtitle mb-2 text-muted">${emp.id}</h6>
+                <p class="card-text">${emp.department || 'No department'} - ${emp.shift === 'day' ? 'Day Shift' : 'Night Shift'}</p>
+                <button class="btn btn-sm btn-primary view-employee-btn" data-id="${emp.id}">View Details</button>
+            </div>
+        `;
+        quickResultsDiv.appendChild(empCard);
+    });
+
+    // Add event listeners to view buttons
+    document.querySelectorAll('.view-employee-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const empId = this.getAttribute('data-id');
+            showEmployeeDetails(empId);
+        });
+    });
+}
+
+// Calculate overstay minutes
+function calculateOverstayMinutes() {
+    const departureTime = getElement('departureTime').value;
+    const approvedOvertime = parseInt(getElement('approvedOvertime').value) || 0;
+    const shiftType = getElement('shiftTypeAttendance').value;
+    const date = getElement('attendanceDate').value;
     
-    if (!title || !ctx) return;
+    if (!departureTime || !shiftType || !date) return;
     
-    // Set title based on type
-    if (type === 'late') {
-        title.textContent = 'Late Arrivals Trend';
+    const departureDateTime = new Date(`${date}T${departureTime}`);
+    let endDateTime;
+    
+    if (shiftType === 'day') {
+        endDateTime = new Date(`${date}T17:30:00`); // 5:30 PM
     } else {
-        title.textContent = 'Absenteeism Trend';
+        endDateTime = new Date(`${date}T05:30:00`); // 5:30 AM next day
+        endDateTime.setDate(endDateTime.getDate() + 1); // Add 1 day for night shift
     }
     
-    // Set default dates (last 30 days)
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - 30);
+    const overtimeMinutes = Math.round((departureDateTime - endDateTime) / (1000 * 60));
+    const overstayMinutes = Math.max(0, overtimeMinutes - approvedOvertime);
     
-    const trendStartDate = getElement('trendStartDate');
-    const trendEndDate = getElement('trendEndDate');
-    if (trendStartDate && trendEndDate) {
-        trendStartDate.valueAsDate = startDate;
-        trendEndDate.valueAsDate = endDate;
-    }
-    
-    // Generate initial chart
-    generateTrendChart(ctx, type, startDate, endDate);
-    
-    // Set up generate button
-    const generateTrendBtn = getElement('generateTrendBtn');
-    if (generateTrendBtn) {
-        generateTrendBtn.onclick = function() {
-            const start = new Date(getElement('trendStartDate')?.value);
-            const end = new Date(getElement('trendEndDate')?.value);
-            
-            if (!start || !end) return;
-            
-            if (start > end) {
-                showAlert('Start date cannot be after end date', 'error');
-                return;
-            }
-            
-            generateTrendChart(ctx, type, start, end);
-        };
-    }
-    
-    // Set up export button
-    const exportTrendBtn = getElement('exportTrendBtn');
-    if (exportTrendBtn) {
-        exportTrendBtn.onclick = function() {
-            const canvas = getElement('trendChart');
-            if (!canvas) return;
-            
-            const link = document.createElement('a');
-            link.download = `${type}_trend_${new Date().toISOString().split('T')[0]}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        };
-    }
-    
-    modal.show();
+    getElement('overstayMinutes').value = overstayMinutes;
 }
 
-// Enhanced generate trend chart function
-function generateTrendChart(ctx, type, startDate, endDate) {
-    if (!ctx) return;
-    
-    // Filter records for the date range
-    const filteredRecords = attendanceRecords.filter(record => {
-        try {
-            const recordDate = new Date(record.date);
-            return recordDate >= startDate && recordDate <= endDate;
-        } catch (error) {
-            console.error('Error parsing date:', record.date, error);
-            return false;
-        }
-    });
-    
-    // Group by date and count late/absent employees
-    const dateMap = {};
-    const currentDate = new Date(startDate);
-    
-    // Initialize date map
-    while (currentDate <= endDate) {
-        const dateStr = currentDate.toISOString().split('T')[0];
-        dateMap[dateStr] = 0;
-        currentDate.setDate(currentDate.getDate() + 1);
-    }
-    
-    // Count records
-    filteredRecords.forEach(record => {
-        if (record.status === type) {
-            dateMap[record.date] = (dateMap[record.date] || 0) + 1;
-        }
-    });
-    
-    // Prepare chart data
-    const labels = Object.keys(dateMap).sort();
-    const data = labels.map(date => dateMap[date]);
-    
-    // Destroy previous chart if it exists
-    if (ctx.chart) {
-        ctx.chart.destroy();
-    }
-    
-    // Create new chart
-    ctx.chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: type === 'late' ? 'Late Employees' : 'Absent Employees',
-                data: data,
-                backgroundColor: type === 'late' ? 'rgba(255, 159, 64, 0.2)' : 'rgba(255, 99, 132, 0.2)',
-                borderColor: type === 'late' ? 'rgba(255, 159, 64, 1)' : 'rgba(255, 99, 132, 1)',
-                borderWidth: 2,
-                tension: 0.1,
-                fill: true
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: true,
-                    text: type === 'late' ? 'Late Arrivals Trend' : 'Absenteeism Trend'
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return `${context.dataset.label}: ${context.raw}`;
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Number of Employees'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Date'
-                    }
-                }
-            }
-        }
-    });
-}
-
-// Enhanced mark all employees as present function
-function markAllEmployeesPresent() {
-    const today = new Date().toISOString().split('T')[0];
-    const activeEmployees = employees.filter(emp => emp.status === 'active');
-    
-    if (activeEmployees.length === 0) {
-        showAlert('No active employees found', 'warning');
-        return;
-    }
-    
-    if (!confirm(`Mark all ${activeEmployees.length} active employees as present today?`)) {
-        return;
-    }
-    
-    let processed = 0;
-    
-    activeEmployees.forEach(employee => {
-        // Check if attendance already recorded for today
-        const existingRecord = attendanceRecords.find(record => 
-            record.empId === employee.id && record.date === today
-        );
-        
-        if (!existingRecord) {
-            const arrivalTime = employee.shift === 'day' ? '09:30' : '21:30';
-            
-            attendanceRecords.push({
-                empId: employee.id,
-                date: today,
-                arrivalTime: arrivalTime,
-                shiftType: employee.shift,
-                status: 'on_time',
-                minutesLate: 0
-            });
-            
-            processed++;
-        }
-    });
-    
-    saveToLocalStorage();
-    updateLateEmployeesList();
-    updateAbsentEmployeesList();
-    
-    showAlert(`Marked ${processed} employees as present today`);
-}
-
-// Enhanced form handlers with better validation
-async function handleEmployeeRegistration(e) {
+// Handle employee registration
+function handleEmployeeRegistration(e) {
     e.preventDefault();
     
     try {
-        const empId = getElement('empId')?.value.trim();
-        const fullName = getElement('fullName')?.value.trim();
-        const phoneNumber = getElement('phoneNumber')?.value;
-        const shiftType = getElement('shiftType')?.value;
-        const workingDays = parseInt(getElement('workingDays')?.value);
-        const agreedSalary = parseFloat(getElement('agreedSalary')?.value);
-        const paymentDay = parseInt(getElement('paymentDay')?.value);
-        const department = getElement('department')?.value;
-        const email = getElement('email')?.value;
-        const photoFile = getElement('photo')?.files[0];
+        const empId = getElement('empId').value.trim();
+        const fullName = getElement('fullName').value.trim();
+        const phoneNumber = getElement('phoneNumber').value;
+        const shiftType = getElement('shiftType').value;
+        const workingDays = parseInt(getElement('workingDays').value);
+        const agreedSalary = parseFloat(getElement('agreedSalary').value);
+        const paymentDay = parseInt(getElement('paymentDay').value);
+        const department = getElement('department').value;
+        const email = getElement('email').value;
         
         // Validate input
         if (!empId || !fullName) {
             throw new Error('Employee ID and Name are required');
         }
         
-        // Check if employee already exists
         if (employees.some(emp => emp.id === empId)) {
             throw new Error('Employee with this ID already exists!');
         }
         
-         // Validate Employee ID (allowing alphanumeric and special chars)
-        if (!empId || !/^[A-Za-z0-9\-_@#$%&*!?+=() ]+$/.test(empId)) {
-            throw new Error('Employee ID can only contain letters, numbers, and special characters (-_@#$%&*!?+=() )');
+        if (isNaN(workingDays) || workingDays < 1 || workingDays > 31) {
+            throw new Error('Working days must be between 1 and 31');
         }
-
-        let photoUrl = '';
         
-        // Upload photo if provided
-        if (photoFile && supabase) {
-            try {
-                const fileExt = photoFile.name.split('.').pop();
-                const fileName = `${empId}.${fileExt}`;
-                const filePath = `employee_photos/${fileName}`;
-                
-                const { error: uploadError } = await supabase
-                    .storage
-                    .from('employee-photos')
-                    .upload(filePath, photoFile);
-                
-                if (uploadError) throw uploadError;
-                
-                // Get public URL
-                const { data: { publicUrl } } = supabase
-                    .storage
-                    .from('employee-photos')
-                    .getPublicUrl(filePath);
-                
-                photoUrl = publicUrl;
-            } catch (error) {
-                console.error('Error uploading photo:', error);
-                // Don't fail the whole operation if photo upload fails
-            }
+        if (isNaN(agreedSalary) || agreedSalary <= 0) {
+            throw new Error('Salary must be a positive number');
         }
-        //create new employees
+        
+        if (isNaN(paymentDay) || paymentDay < 1 || paymentDay > 31) {
+            throw new Error('Payment day must be between 1 and 31');
+        }
+        
+        // Create new employee
         const newEmployee = {
             id: empId,
             name: fullName,
@@ -1690,96 +567,46 @@ async function handleEmployeeRegistration(e) {
             paymentDay: paymentDay,
             department: department,
             email: email,
-            photoUrl: photoUrl,
             status: 'active',
             deductions: [],
             createdAt: new Date().toISOString()
         };
         
-        // Validate employee data
-        validateEmployeeData(newEmployee);
-        
         employees.push(newEmployee);
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'add_employee',
-            data: newEmployee,
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         showAlert('Employee registered successfully!');
-        const employeeForm = getElement('employeeForm');
-        if (employeeForm) employeeForm.reset();
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
+        getElement('employeeForm').reset();
     } catch (error) {
         showAlert(error.message, 'error');
     }
 }
 
-// Enhanced attendance recording with better time validation
-async function handleAttendanceRecording(e) {
+// Handle attendance recording
+function handleAttendanceRecording(e) {
     e.preventDefault();
     
     try {
-        const empId = getElement('attendanceEmpId')?.value;
-        const date = getElement('attendanceDate')?.value;
-        const arrivalTime = getElement('arrivalTime')?.value;
-        const departureTime = getElement('departureTime')?.value;
-        const approvedOvertime = parseInt(getElement('approvedOvertime')?.value) || 0;
-        const shiftType = getElement('shiftTypeAttendance')?.value;
+        const empId = getElement('attendanceEmpId').value;
+        const date = getElement('attendanceDate').value;
+        const arrivalTime = getElement('arrivalTime').value;
+        const departureTime = getElement('departureTime').value;
+        const approvedOvertime = parseInt(getElement('approvedOvertime').value) || 0;
+        const shiftType = getElement('shiftTypeAttendance').value;
+        const overstayMinutes = parseInt(getElement('overstayMinutes').value) || 0;
         
         if (!empId || !date || !arrivalTime || !shiftType) {
-            throw new Error('All fields are required');
+            throw new Error('All required fields must be filled');
         }
         
-        // Validate time format
-        if (!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(arrivalTime)) {
-            throw new Error('Invalid time format. Use HH:MM (24-hour format)');
-        }
-        
-                
-        // Calculate overstay minutes if departure time is provided
-        let overstayMinutes = 0;
-        if (departureTime) {
-            const shiftEndTime = shiftType === 'day' ? '17:30' : '05:30';
-            const departureDateTime = new Date(`${date}T${departureTime}`);
-            let endDateTime = new Date(`${date}T${shiftEndTime}`);
-            
-            // For night shift ending next day
-            if (shiftType === 'night') {
-                endDateTime.setDate(endDateTime.getDate() + 1);
-            }
-            
-            const overtimeMinutes = Math.round((departureDateTime - endDateTime) / (1000 * 60));
-            overstayMinutes = Math.max(0, overtimeMinutes - approvedOvertime);
-        }
-
-
-
         // Check if employee exists
         const employee = employees.find(emp => emp.id === empId);
         if (!employee) {
             throw new Error('Employee not found!');
         }
         
-        // Check if attendance already recorded for this date
-        const existingRecordIndex = attendanceRecords.findIndex(record => 
-            record.empId === empId && record.date === date
-        );
-        
         // Calculate if late
         const arrivalDateTime = new Date(`${date}T${arrivalTime}`);
-        if (isNaN(arrivalDateTime.getTime())) {
-            throw new Error('Invalid date or time');
-        }
-        
         let expectedTime, minutesLate = 0;
         let status = 'on_time';
         
@@ -1789,15 +616,12 @@ async function handleAttendanceRecording(e) {
             expectedTime = new Date(`${date}T21:30:00`);
         }
         
-        if (isNaN(expectedTime.getTime())) {
-            throw new Error('Invalid shift time calculation');
-        }
-        
         if (arrivalDateTime > expectedTime) {
             minutesLate = Math.round((arrivalDateTime - expectedTime) / (1000 * 60));
             status = 'late';
         }
         
+        // Create attendance record
         const attendanceRecord = {
             empId: empId,
             date: date,
@@ -1806,26 +630,23 @@ async function handleAttendanceRecording(e) {
             shiftType: shiftType,
             status: status,
             minutesLate: minutesLate,
+            approvedOvertime: approvedOvertime,
+            overstayMinutes: overstayMinutes,
             recordedAt: new Date().toISOString()
         };
-
         
-
-        if (existingRecordIndex >= 0) {
-            attendanceRecords[existingRecordIndex] = attendanceRecord;
+        // Check if attendance already recorded for this date
+        const existingIndex = attendanceRecords.findIndex(record => 
+            record.empId === empId && record.date === date
+        );
+        
+        if (existingIndex >= 0) {
+            attendanceRecords[existingIndex] = attendanceRecord;
         } else {
             attendanceRecords.push(attendanceRecord);
         }
         
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'add_attendance',
-            data: attendanceRecord,
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         // Show status
         const statusDiv = getElement('attendanceStatus');
@@ -1840,19 +661,13 @@ async function handleAttendanceRecording(e) {
                         `<span class="late-status">Late by ${minutesLate} minutes</span>` : 
                         `<span class="on-time-status">On Time</span>`}
                     </p>
+                    ${overstayMinutes > 0 ? `<p>Overstay Minutes: ${overstayMinutes} (Deduction: Ksh ${(overstayMinutes * settings.deductionRate).toFixed(2)})</p>` : ''}
                 </div>
             `;
         }
         
-        const attendanceForm = getElement('attendanceForm');
-         
-        await saveAttendanceRecord(attendanceRecord);
-        
-        // Update the overstay minutes display
-        getElement('overstayMinutes').value = overstayMinutes;
-        
         showAlert('Attendance recorded successfully!');
-        if (attendanceForm) attendanceForm.reset();
+        getElement('attendanceForm').reset();
         updateLateEmployeesList();
         updateAbsentEmployeesList();
         
@@ -1863,28 +678,21 @@ async function handleAttendanceRecording(e) {
                 notifyLateEmployees([attendanceRecord]);
             }
         }
-        
-        showAlert('Attendance recorded successfully!');
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
 }
 
-// Enhanced leave recording with date validation
-async function handleLeaveRecording(e) {
+// Handle leave recording
+function handleLeaveRecording(e) {
     e.preventDefault();
     
     try {
-        const empId = getElement('leaveEmpId')?.value;
-        const leaveType = getElement('leaveType')?.value;
-        const startDate = getElement('leaveStartDate')?.value;
-        const endDate = getElement('leaveEndDate')?.value;
-        const reason = getElement('leaveReason')?.value;
+        const empId = getElement('leaveEmpId').value;
+        const leaveType = getElement('leaveType').value;
+        const startDate = getElement('leaveStartDate').value;
+        const endDate = getElement('leaveEndDate').value;
+        const reason = getElement('leaveReason').value;
         
         if (!empId || !leaveType || !startDate || !endDate) {
             throw new Error('Employee ID, leave type, and dates are required');
@@ -1918,75 +726,171 @@ async function handleLeaveRecording(e) {
         };
         
         leaveRecords.push(leaveRecord);
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'add_leave',
-            data: leaveRecord,
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         showAlert('Leave/Rest days added successfully!');
-        const leaveForm = getElement('leaveForm');
-        if (leaveForm) leaveForm.reset();
+        getElement('leaveForm').reset();
         updateLeaveDaysList();
         updateAbsentEmployeesList();
         
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
+        // Send a copy to employee records and notify admin
+        notifyAdminAboutLeave(employee, leaveRecord);
     } catch (error) {
         showAlert(error.message, 'error');
     }
 }
 
-// Edit employee ID
-async function editEmployeeId(oldId, newId) {
+// Notify admin about leave
+function notifyAdminAboutLeave(employee, leaveRecord) {
+    if (settings.enableNotifications) {
+        const notification = new Notification('New Leave Request', {
+            body: `${employee.name} (${employee.id}) has been granted leave from ${formatDateShort(leaveRecord.startDate)} to ${formatDateShort(leaveRecord.endDate)}`,
+            icon: 'https://cdn-icons-png.flaticon.com/512/3143/3143463.png'
+        });
+        
+        playNotificationSound();
+    }
+    
+    if (settings.enableEmailNotifications && settings.notificationEmail) {
+        console.log(`Would send email to ${settings.notificationEmail} about leave for ${employee.name}`);
+    }
+}
+
+// Show edit ID modal
+function showEditIdModal() {
+    const modal = new bootstrap.Modal(getElement('editIdModal'));
+    const currentEmpId = getElement('modalEmpId').value;
+    
+    getElement('currentEmpId').value = currentEmpId;
+    getElement('newEmpId').value = currentEmpId;
+    
+    modal.show();
+}
+
+// Handle edit ID
+function handleEditId(e) {
+    e.preventDefault();
+    
     try {
-        // Validate new ID
-        if (!newId || !/^[A-Za-z0-9\-_@#$%&*!?+=() ]+$/.test(newId)) {
-            throw new Error('Invalid Employee ID format');
+        const currentId = getElement('currentEmpId').value;
+        const newId = getElement('newEmpId').value.trim();
+        
+        if (!newId) {
+            throw new Error('New Employee ID is required');
+        }
+        
+        if (newId === currentId) {
+            throw new Error('New ID is the same as current ID');
+        }
+        
+        if (employees.some(emp => emp.id === newId)) {
+            throw new Error('Employee with this ID already exists');
         }
         
         // Find employee
-        const employee = employees.find(e => e.id === oldId);
-        if (!employee) {
+        const employeeIndex = employees.findIndex(emp => emp.id === currentId);
+        if (employeeIndex === -1) {
             throw new Error('Employee not found');
         }
         
-        // Check if new ID already exists
-        const idExists = await apiRequest(`/employees/check-id/${newId}`);
-        if (idExists.exists) {
-            throw new Error('Employee ID already in use');
-        }
+        // Update employee ID
+        employees[employeeIndex].id = newId;
         
-        // Update employee ID via API
-        await apiRequest(`/employees/${oldId}/update-id`, 'PUT', { newId });
+        // Update all references in attendance records
+        attendanceRecords.forEach(record => {
+            if (record.empId === currentId) {
+                record.empId = newId;
+            }
+        });
         
-        // Update local cache
-        employee.id = newId;
-        attendanceRecords.forEach(r => { if (r.empId === oldId) r.empId = newId; });
-        leaveRecords.forEach(r => { if (r.empId === oldId) r.empId = newId; });
-        deductions.forEach(d => { if (d.empId === oldId) d.empId = newId; });
+        // Update all references in leave records
+        leaveRecords.forEach(record => {
+            if (record.empId === currentId) {
+                record.empId = newId;
+            }
+        });
+        
+        // Update all references in deductions
+        deductions.forEach(deduction => {
+            if (deduction.empId === currentId) {
+                deduction.empId = newId;
+            }
+        });
+        
+        // Update all references in salary records
+        salaryRecords.forEach(record => {
+            if (record.empId === currentId) {
+                record.empId = newId;
+            }
+        });
+        
+        saveData();
+        
+        const modal = bootstrap.Modal.getInstance(getElement('editIdModal'));
+        modal.hide();
         
         showAlert('Employee ID updated successfully!');
-        return true;
+        
+        // Refresh employee details view
+        showEmployeeDetails(newId);
     } catch (error) {
         showAlert(error.message, 'error');
-        return false;
     }
 }
 
-// Enhanced salary calculation with better validation - FIXED: Added proper salary calculation function
-async function handleSalaryCalculation() {
+// Handle employee update
+function handleEmployeeUpdate() {
     try {
-        const empId = getElement('salaryEmpId')?.value;
-        const calcMonth = getElement('calcMonth')?.value;
-        const emergencyCalc = getElement('emergencyCalc')?.checked || false;
-        const includeBonus = getElement('includeBonus')?.checked || false;
+        const empId = getElement('modalEmpId').value;
+        const empName = getElement('modalEmpName').value;
+        const empPhone = getElement('modalEmpPhone').value;
+        const empShift = getElement('modalEmpShift').value;
+        const empWorkingDays = getElement('modalEmpWorkingDays').value;
+        const empSalary = getElement('modalEmpSalary').value;
+        const empPaymentDay = getElement('modalEmpPaymentDay').value;
+        
+        if (!empId || !empName) {
+            throw new Error('Employee ID and Name are required');
+        }
+        
+        const employeeIndex = employees.findIndex(emp => emp.id === empId);
+        
+        if (employeeIndex === -1) {
+            throw new Error('Employee not found!');
+        }
+        
+        const updatedEmployee = {
+            ...employees[employeeIndex],
+            name: empName,
+            phone: empPhone,
+            shift: empShift,
+            workingDays: parseInt(empWorkingDays),
+            salary: parseFloat(empSalary),
+            paymentDay: parseInt(empPaymentDay),
+            updatedAt: new Date().toISOString()
+        };
+        
+        employees[employeeIndex] = updatedEmployee;
+        saveData();
+        
+        const modal = bootstrap.Modal.getInstance(getElement('employeeModal'));
+        if (modal) {
+            modal.hide();
+        }
+        
+        showAlert('Employee details updated successfully!');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Handle salary calculation
+function handleSalaryCalculation() {
+    try {
+        const empId = getElement('salaryEmpId').value;
+        const calcMonth = getElement('calcMonth').value;
+        const emergencyCalc = getElement('emergencyCalc').checked || false;
+        const includeBonus = getElement('includeBonus').checked || false;
         
         if (!empId && !calcMonth) {
             throw new Error('Please enter Employee ID or select a month to calculate salaries for all employees');
@@ -2121,6 +1025,35 @@ function calculateEmployeeSalary(empId, month, emergencyCalc = false, includeBon
         const totalDeductions = lateDeduction + absentDeduction + otherDeductions;
         const netSalary = grossSalary - totalDeductions + bonus;
         
+        // Create salary record
+        const salaryRecord = {
+            empId: empId,
+            month: `${calcYear}-${String(calcMonth).padStart(2, '0')}`,
+            grossSalary: grossSalary,
+            deductions: totalDeductions,
+            bonus: bonus,
+            netSalary: netSalary,
+            status: 'calculated', // Will be updated to 'paid' when actually paid
+            calculatedAt: new Date().toISOString(),
+            workingDays: workingDays,
+            absentDays: absentDays,
+            lateMinutes: lateMinutes,
+            leaveDays: leaveDays
+        };
+        
+        // Check if salary already calculated for this month
+        const existingIndex = salaryRecords.findIndex(record => 
+            record.empId === empId && record.month === salaryRecord.month
+        );
+        
+        if (existingIndex >= 0) {
+            salaryRecords[existingIndex] = salaryRecord;
+        } else {
+            salaryRecords.push(salaryRecord);
+        }
+        
+        saveData();
+        
         // Display results
         const salaryResult = getElement('salaryResult');
         const salaryDetails = getElement('salaryDetails');
@@ -2167,6 +1100,7 @@ function calculateEmployeeSalary(empId, month, emergencyCalc = false, includeBon
             
             <div class="alert alert-success">
                 <h4>Net Salary: Ksh ${netSalary.toFixed(2)}</h4>
+                <p class="mb-0">Status: ${salaryRecord.status === 'calculated' ? 'Calculated (Pending Payment)' : 'Paid'}</p>
             </div>
             
             <div class="row">
@@ -2204,10 +1138,328 @@ function calculateEmployeeSalary(empId, month, emergencyCalc = false, includeBon
                     </div>
                 </div>
             </div>
+            
+            <div class="d-flex justify-content-end mt-3">
+                <button class="btn btn-primary me-2" id="markAsPaidBtn">Mark as Paid</button>
+                <button class="btn btn-success me-2" id="emailPayslipBtn">Email Payslip</button>
+                <button class="btn btn-info me-2" id="exportPayslipBtn">Export Payslip</button>
+                <button class="btn btn-secondary" id="printPayslipBtn">Print Payslip</button>
+            </div>
         `;
         
         salaryResult.classList.remove('d-none');
         showAlert('Salary calculated successfully!');
+        
+        // Add event listeners to the new buttons
+        getElement('markAsPaidBtn')?.addEventListener('click', function() {
+            markSalaryAsPaid(empId, `${calcYear}-${String(calcMonth).padStart(2, '0')}`);
+        });
+        
+        getElement('emailPayslipBtn')?.addEventListener('click', function() {
+            emailPayslip(empId, `${calcYear}-${String(calcMonth).padStart(2, '0')}`);
+        });
+        
+        getElement('exportPayslipBtn')?.addEventListener('click', function() {
+            exportPayslip(empId, `${calcYear}-${String(calcMonth).padStart(2, '0')}`);
+        });
+        
+        getElement('printPayslipBtn')?.addEventListener('click', function() {
+            printPayslip(empId, `${calcYear}-${String(calcMonth).padStart(2, '0')}`);
+        });
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Mark salary as paid
+function markSalaryAsPaid(empId, month) {
+    try {
+        const recordIndex = salaryRecords.findIndex(record => 
+            record.empId === empId && record.month === month
+        );
+        
+        if (recordIndex === -1) {
+            throw new Error('Salary record not found');
+        }
+        
+        salaryRecords[recordIndex].status = 'paid';
+        salaryRecords[recordIndex].paidAt = new Date().toISOString();
+        saveData();
+        
+        showAlert('Salary marked as paid successfully!');
+        
+        // Refresh the salary details view
+        const salaryDetails = getElement('salaryDetails');
+        if (salaryDetails) {
+            const statusDiv = salaryDetails.querySelector('.alert-success p.mb-0');
+            if (statusDiv) {
+                statusDiv.textContent = 'Status: Paid';
+            }
+        }
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Email payslip
+function emailPayslip(empId, month) {
+    try {
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        const salaryRecord = salaryRecords.find(record => 
+            record.empId === empId && record.month === month
+        );
+        
+        if (!salaryRecord) {
+            throw new Error('Salary record not found');
+        }
+        
+        if (!employee.email) {
+            throw new Error('Employee does not have an email address');
+        }
+        
+        // In a real application, this would send an actual email
+        console.log(`Would send payslip to ${employee.email} for ${employee.name} (${employee.id}) for ${month}`);
+        showAlert(`Payslip would be emailed to ${employee.email}`, 'info');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Export payslip as PDF
+function exportPayslip(empId, month) {
+    try {
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        const salaryRecord = salaryRecords.find(record => 
+            record.empId === empId && record.month === month
+        );
+        
+        if (!salaryRecord) {
+            throw new Error('Salary record not found');
+        }
+        
+        // Create a simple HTML payslip
+        const payslipHTML = `
+            <html>
+                <head>
+                    <title>Payslip - ${employee.name} - ${month}</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; }
+                        .header { text-align: center; margin-bottom: 20px; }
+                        .company-name { font-size: 24px; font-weight: bold; }
+                        .payslip-title { font-size: 18px; margin: 10px 0; }
+                        .details { margin-bottom: 20px; }
+                        .detail-row { display: flex; margin-bottom: 5px; }
+                        .detail-label { width: 150px; font-weight: bold; }
+                        .table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                        .table th, .table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                        .table th { background-color: #f2f2f2; }
+                        .total-row { font-weight: bold; }
+                        .footer { margin-top: 30px; text-align: center; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <div class="company-name">COMPANY NAME</div>
+                        <div class="payslip-title">PAYSLIP FOR ${month}</div>
+                    </div>
+                    
+                    <div class="details">
+                        <div class="detail-row">
+                            <div class="detail-label">Employee Name:</div>
+                            <div>${employee.name}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Employee ID:</div>
+                            <div>${employee.id}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Department:</div>
+                            <div>${employee.department || 'N/A'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Payment Date:</div>
+                            <div>${formatDate(new Date().toISOString())}</div>
+                        </div>
+                    </div>
+                    
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Amount (Ksh)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Basic Salary</td>
+                                <td>${salaryRecord.grossSalary.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                                <td>Deductions</td>
+                                <td>-${salaryRecord.deductions.toFixed(2)}</td>
+                            </tr>
+                            ${salaryRecord.bonus > 0 ? `
+                            <tr>
+                                <td>Bonus</td>
+                                <td>${salaryRecord.bonus.toFixed(2)}</td>
+                            </tr>
+                            ` : ''}
+                            <tr class="total-row">
+                                <td>Net Salary</td>
+                                <td>${salaryRecord.netSalary.toFixed(2)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <div class="footer">
+                        <p>This is an automated payslip. Please contact HR for any discrepancies.</p>
+                        <p>Generated on ${formatDate(new Date().toISOString())}</p>
+                    </div>
+                </body>
+            </html>
+        `;
+        
+        // In a real application, this would convert HTML to PDF and download
+        // For demo purposes, we'll just show the HTML in a new window
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(payslipHTML);
+        printWindow.document.close();
+        
+        showAlert('Payslip exported successfully!');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Print payslip
+function printPayslip(empId, month) {
+    try {
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        const salaryRecord = salaryRecords.find(record => 
+            record.empId === empId && record.month === month
+        );
+        
+        if (!salaryRecord) {
+            throw new Error('Salary record not found');
+        }
+        
+        // Create a simple HTML payslip
+        const payslipHTML = `
+            <html>
+                <head>
+                    <title>Payslip - ${employee.name} - ${month}</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; }
+                        .header { text-align: center; margin-bottom: 20px; }
+                        .company-name { font-size: 24px; font-weight: bold; }
+                        .payslip-title { font-size: 18px; margin: 10px 0; }
+                        .details { margin-bottom: 20px; }
+                        .detail-row { display: flex; margin-bottom: 5px; }
+                        .detail-label { width: 150px; font-weight: bold; }
+                        .table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                        .table th, .table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                        .table th { background-color: #f2f2f2; }
+                        .total-row { font-weight: bold; }
+                        .footer { margin-top: 30px; text-align: center; font-size: 12px; }
+                        @media print {
+                            body { padding: 0; margin: 0; }
+                            .no-print { display: none !important; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <div class="company-name">COMPANY NAME</div>
+                        <div class="payslip-title">PAYSLIP FOR ${month}</div>
+                    </div>
+                    
+                    <div class="details">
+                        <div class="detail-row">
+                            <div class="detail-label">Employee Name:</div>
+                            <div>${employee.name}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Employee ID:</div>
+                            <div>${employee.id}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Department:</div>
+                            <div>${employee.department || 'N/A'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Payment Date:</div>
+                            <div>${formatDate(new Date().toISOString())}</div>
+                        </div>
+                    </div>
+                    
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Amount (Ksh)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Basic Salary</td>
+                                <td>${salaryRecord.grossSalary.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                                <td>Deductions</td>
+                                <td>-${salaryRecord.deductions.toFixed(2)}</td>
+                            </tr>
+                            ${salaryRecord.bonus > 0 ? `
+                            <tr>
+                                <td>Bonus</td>
+                                <td>${salaryRecord.bonus.toFixed(2)}</td>
+                            </tr>
+                            ` : ''}
+                            <tr class="total-row">
+                                <td>Net Salary</td>
+                                <td>${salaryRecord.netSalary.toFixed(2)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <div class="footer">
+                        <p>This is an automated payslip. Please contact HR for any discrepancies.</p>
+                        <p>Generated on ${formatDate(new Date().toISOString())}</p>
+                    </div>
+                    
+                    <div class="no-print" style="text-align: center; margin-top: 20px;">
+                        <button onclick="window.print()" class="btn btn-primary">Print Payslip</button>
+                        <button onclick="window.close()" class="btn btn-secondary">Close</button>
+                    </div>
+                    
+                    <script>
+                        // Auto-print when window loads
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+            </html>
+        `;
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(payslipHTML);
+        printWindow.document.close();
+        
+        showAlert('Payslip opened for printing!');
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -2270,6 +1522,32 @@ function calculateAllSalaries(month, emergencyCalc = false, includeBonus = false
             const totalDeductions = lateDeduction + absentDeduction + otherDeductions;
             const netSalary = employee.salary - totalDeductions + bonus;
             
+            // Create salary record
+            const salaryRecord = {
+                empId: employee.id,
+                month: `${calcYear}-${String(calcMonth).padStart(2, '0')}`,
+                grossSalary: employee.salary,
+                deductions: totalDeductions,
+                bonus: bonus,
+                netSalary: netSalary,
+                status: 'calculated', // Will be updated to 'paid' when actually paid
+                calculatedAt: new Date().toISOString(),
+                workingDays: workingDays,
+                absentDays: absentDays,
+                lateMinutes: lateMinutes
+            };
+            
+            // Check if salary already calculated for this month
+            const existingIndex = salaryRecords.findIndex(record => 
+                record.empId === employee.id && record.month === salaryRecord.month
+            );
+            
+            if (existingIndex >= 0) {
+                salaryRecords[existingIndex] = salaryRecord;
+            } else {
+                salaryRecords.push(salaryRecord);
+            }
+            
             salaryResults.push({
                 id: employee.id,
                 name: employee.name,
@@ -2280,6 +1558,8 @@ function calculateAllSalaries(month, emergencyCalc = false, includeBonus = false
                 status: netSalary > 0 ? 'Pending' : 'Paid'
             });
         });
+        
+        saveData();
         
         // Show summary
         const salaryResult = getElement('salaryResult');
@@ -2348,11 +1628,101 @@ function calculateAllSalaries(month, emergencyCalc = false, includeBonus = false
                     </div>
                 </div>
             </div>
+            
+            <div class="d-flex justify-content-end mt-3">
+                <button class="btn btn-primary me-2" id="markAllAsPaidBtn">Mark All as Paid</button>
+                <button class="btn btn-success me-2" id="exportAllPayslipsBtn">Export All Payslips</button>
+                <button class="btn btn-secondary" id="printAllPayslipsBtn">Print All Payslips</button>
+            </div>
         `;
         
         salaryDetails.innerHTML = html;
         salaryResult.classList.remove('d-none');
         showAlert(`Calculated salaries for ${activeEmployees.length} employees`);
+        
+        // Add event listeners to the new buttons
+        getElement('markAllAsPaidBtn')?.addEventListener('click', function() {
+            markAllSalariesAsPaid(`${calcYear}-${String(calcMonth).padStart(2, '0')}`);
+        });
+        
+        getElement('exportAllPayslipsBtn')?.addEventListener('click', function() {
+            exportAllPayslips(`${calcYear}-${String(calcMonth).padStart(2, '0')}`);
+        });
+        
+        getElement('printAllPayslipsBtn')?.addEventListener('click', function() {
+            printAllPayslips(`${calcYear}-${String(calcMonth).padStart(2, '0')}`);
+        });
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Mark all salaries as paid for a month
+function markAllSalariesAsPaid(month) {
+    try {
+        const monthRecords = salaryRecords.filter(record => 
+            record.month === month && record.status === 'calculated'
+        );
+        
+        if (monthRecords.length === 0) {
+            throw new Error('No calculated salaries found for this month');
+        }
+        
+        if (confirm(`Mark ${monthRecords.length} salaries as paid for ${month}?`)) {
+            monthRecords.forEach(record => {
+                record.status = 'paid';
+                record.paidAt = new Date().toISOString();
+            });
+            
+            saveData();
+            showAlert(`Marked ${monthRecords.length} salaries as paid for ${month}`);
+            
+            // Refresh the view
+            const salaryDetails = getElement('salaryDetails');
+            if (salaryDetails) {
+                const rows = salaryDetails.querySelectorAll('tbody tr');
+                rows.forEach(row => {
+                    const statusCell = row.querySelector('td:last-child');
+                    if (statusCell) {
+                        statusCell.textContent = 'Paid';
+                    }
+                });
+            }
+        }
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Export all payslips for a month
+function exportAllPayslips(month) {
+    try {
+        const monthRecords = salaryRecords.filter(record => record.month === month);
+        
+        if (monthRecords.length === 0) {
+            throw new Error('No salary records found for this month');
+        }
+        
+        // In a real application, this would create a ZIP file with all payslips
+        // For demo purposes, we'll just show an alert
+        showAlert(`Would export ${monthRecords.length} payslips for ${month} as a ZIP file`, 'info');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Print all payslips for a month
+function printAllPayslips(month) {
+    try {
+        const monthRecords = salaryRecords.filter(record => record.month === month);
+        
+        if (monthRecords.length === 0) {
+            throw new Error('No salary records found for this month');
+        }
+        
+        // In a real application, this would print all payslips
+        // For demo purposes, we'll just show an alert
+        showAlert(`Would print ${monthRecords.length} payslips for ${month}`, 'info');
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -2462,25 +1832,11 @@ async function handleEmployeeDeregistration(e) {
             employees[employeeIndex].deregisterNotes = notes;
             employees[employeeIndex].deregisteredAt = new Date().toISOString();
             
-            saveToLocalStorage();
-            
-            // Add to sync queue
-            syncQueue.push({
-                type: 'update_employee',
-                employeeId: empId,
-                data: employees[employeeIndex],
-                timestamp: new Date().toISOString()
-            });
-            updateSyncQueueAlert();
+            saveData();
             
             showAlert('Employee has been deregistered.');
             const deregisterForm = getElement('deregisterForm');
             if (deregisterForm) deregisterForm.reset();
-            
-            // If online, try to sync immediately
-            if (navigator.onLine) {
-                processSyncQueue();
-            }
         }
     } catch (error) {
         showAlert(error.message, 'error');
@@ -2519,19 +1875,8 @@ async function handleEmployeeUpdate() {
             updatedAt: new Date().toISOString()
         };
         
-        validateEmployeeData(updatedEmployee);
-        
         employees[employeeIndex] = updatedEmployee;
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'update_employee',
-            employeeId: empId,
-            data: updatedEmployee,
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         const modal = bootstrap.Modal.getInstance(getElement('employeeModal'));
         if (modal) {
@@ -2539,11 +1884,6 @@ async function handleEmployeeUpdate() {
         }
         
         showAlert('Employee details updated successfully!');
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -2579,15 +1919,7 @@ async function handleDeductionAdd(e) {
         };
         
         deductions.push(deduction);
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'add_deduction',
-            data: deduction,
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         showAlert('Deduction added successfully!');
         
@@ -2598,11 +1930,6 @@ async function handleDeductionAdd(e) {
         
         const deductionForm = getElement('deductionForm');
         if (deductionForm) deductionForm.reset();
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -2767,15 +2094,7 @@ function saveEditedAttendance() {
             updatedAt: new Date().toISOString()
         };
         
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'update_attendance',
-            data: attendanceRecords[recordIndex],
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(getElement('editAttendanceModal'));
@@ -2786,11 +2105,6 @@ function saveEditedAttendance() {
         showAlert('Attendance record updated successfully!');
         updateLateEmployeesList();
         updateAbsentEmployeesList();
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -2811,17 +2125,9 @@ function deleteAttendanceRecord(empId, date) {
             throw new Error('Record not found');
         }
         
-        // Add to sync queue before deleting (for sync purposes)
-        syncQueue.push({
-            type: 'delete_attendance',
-            data: attendanceRecords[recordIndex],
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
-        
         // Remove from local storage
         attendanceRecords.splice(recordIndex, 1);
-        saveToLocalStorage();
+        saveData();
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(getElement('editAttendanceModal'));
@@ -2832,11 +2138,6 @@ function deleteAttendanceRecord(empId, date) {
         showAlert('Attendance record deleted successfully!');
         updateLateEmployeesList();
         updateAbsentEmployeesList();
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -2926,23 +2227,10 @@ function markEmployeeAbsent(empId, date) {
             };
             
             attendanceRecords.push(attendanceRecord);
-            saveToLocalStorage();
-            
-            // Add to sync queue
-            syncQueue.push({
-                type: 'add_attendance',
-                data: attendanceRecord,
-                timestamp: new Date().toISOString()
-            });
-            updateSyncQueueAlert();
+            saveData();
             
             showAlert('Employee marked as absent.');
             updateAbsentEmployeesList();
-            
-            // If online, try to sync immediately
-            if (navigator.onLine) {
-                processSyncQueue();
-            }
         }
     } catch (error) {
         showAlert(error.message, 'error');
@@ -2965,6 +2253,10 @@ function updateLeaveDaysList() {
         leaveRecords.forEach((record, index) => {
             const employee = employees.find(emp => emp.id === record.empId);
             if (employee) {
+                const today = new Date().toISOString().split('T')[0];
+                const isActive = record.startDate <= today && record.endDate >= today;
+                const isOverdue = new Date(record.endDate) < new Date(today);
+                
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${employee.id}</td>
@@ -2975,6 +2267,11 @@ function updateLeaveDaysList() {
                           record.type === 'paternity_leave' ? 'Paternity Leave' : 'Rest Day'}</td>
                     <td>${formatDate(record.startDate)}</td>
                     <td>${formatDate(record.endDate)}</td>
+                    <td>
+                        <span class="badge ${isActive ? 'bg-success' : isOverdue ? 'bg-danger' : 'bg-info'}">
+                            ${isActive ? 'Active' : isOverdue ? 'Overdue' : 'Upcoming'}
+                        </span>
+                    </td>
                     <td>
                         <button class="btn btn-sm btn-primary edit-leave" data-index="${index}">
                             <i class="bi bi-pencil"></i> Edit
@@ -3080,15 +2377,7 @@ function saveEditedLeave() {
             updatedAt: new Date().toISOString()
         };
         
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'update_leave',
-            data: leaveRecords[index],
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(getElement('editLeaveModal'));
@@ -3099,11 +2388,6 @@ function saveEditedLeave() {
         showAlert('Leave record updated successfully!');
         updateLeaveDaysList();
         updateAbsentEmployeesList();
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -3120,17 +2404,9 @@ function deleteLeaveRecord(index) {
             throw new Error('Invalid record index');
         }
         
-        // Add to sync queue before deleting (for sync purposes)
-        syncQueue.push({
-            type: 'delete_leave',
-            data: leaveRecords[index],
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
-        
         // Remove from local storage
         leaveRecords.splice(index, 1);
-        saveToLocalStorage();
+        saveData();
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(getElement('editLeaveModal'));
@@ -3141,11 +2417,6 @@ function deleteLeaveRecord(index) {
         showAlert('Leave record deleted successfully!');
         updateLeaveDaysList();
         updateAbsentEmployeesList();
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
-        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
@@ -3170,6 +2441,7 @@ function showEmployeeDetails(empId) {
         const empAttendance = attendanceRecords.filter(record => record.empId === empId);
         const empDeductions = deductions.filter(ded => ded.empId === empId);
         const empLeaves = leaveRecords.filter(leave => leave.empId === empId);
+        const empSalaries = salaryRecords.filter(salary => salary.empId === empId);
         
         // Calculate total deductions
         const totalDeductions = empDeductions.reduce((sum, ded) => sum + ded.amount, 0);
@@ -3250,7 +2522,10 @@ function showEmployeeDetails(empId) {
                     <button class="nav-link" id="leave-tab" data-bs-toggle="tab" data-bs-target="#leave-tab-pane" type="button" role="tab">Leave</button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="deductions-tab" data-bs-toggle="tab" data-bs-target="#deductions-tab-pane" type="button" role="tab">Deductions</button>
+                    <button class="nav-link" id="deductions-tab" data-bs-toggle="tab" data-bs-target="#deductions-tab-pane" type="button" role="tab">Deductions</td>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="salary-tab" data-bs-toggle="tab" data-bs-target="#salary-tab-pane" type="button" role="tab">Salary History</td>
                 </li>
             </ul>
             
@@ -3313,6 +2588,7 @@ function showEmployeeDetails(empId) {
                                     <th>Start Date</th>
                                     <th>End Date</th>
                                     <th>Reason</th>
+                                    <th>Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -3320,9 +2596,13 @@ function showEmployeeDetails(empId) {
         `;
         
         if (empLeaves.length === 0) {
-            html += '<tr><td colspan="5" class="text-center">No leave/rest days</td></tr>';
+            html += '<tr><td colspan="6" class="text-center">No leave/rest days</td></tr>';
         } else {
             empLeaves.forEach((leave, index) => {
+                const today = new Date().toISOString().split('T')[0];
+                const isActive = leave.startDate <= today && leave.endDate >= today;
+                const isOverdue = new Date(leave.endDate) < new Date(today);
+                
                 html += `
                     <tr>
                         <td>${leave.type === 'paid_leave' ? 'Paid Leave' : 
@@ -3332,6 +2612,11 @@ function showEmployeeDetails(empId) {
                         <td>${formatDate(leave.startDate)}</td>
                         <td>${formatDate(leave.endDate)}</td>
                         <td>${leave.reason || 'N/A'}</td>
+                        <td>
+                            <span class="badge ${isActive ? 'bg-success' : isOverdue ? 'bg-danger' : 'bg-info'}">
+                                ${isActive ? 'Active' : isOverdue ? 'Overdue' : 'Upcoming'}
+                            </span>
+                        </td>
                         <td>
                             <button class="btn btn-sm btn-primary edit-leave" data-index="${index}">
                                 <i class="bi bi-pencil"></i>
@@ -3379,7 +2664,61 @@ function showEmployeeDetails(empId) {
             });
         }
         
-        html += `</div></div></div>`;
+        html += `
+                    </div>
+                </div>
+                
+                <div class="tab-pane fade" id="salary-tab-pane" role="tabpanel">
+                    <h5>Salary History</h5>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Month</th>
+                                    <th>Gross Salary</th>
+                                    <th>Deductions</th>
+                                    <th>Bonus</th>
+                                    <th>Net Salary</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+        `;
+        
+        if (empSalaries.length === 0) {
+            html += '<tr><td colspan="7" class="text-center">No salary records</td></tr>';
+        } else {
+            empSalaries.forEach((salary, index) => {
+                html += `
+                    <tr>
+                        <td>${salary.month}</td>
+                        <td>Ksh ${salary.grossSalary.toFixed(2)}</td>
+                        <td>Ksh ${salary.deductions.toFixed(2)}</td>
+                        <td>Ksh ${salary.bonus.toFixed(2)}</td>
+                        <td>Ksh ${salary.netSalary.toFixed(2)}</td>
+                        <td>
+                            <span class="badge ${salary.status === 'paid' ? 'bg-success' : 'bg-warning'}">
+                                ${salary.status === 'paid' ? 'Paid' : 'Pending'}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-primary view-salary" data-index="${index}">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+        
+        html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
         
         modalBody.innerHTML = html;
         
@@ -3406,7 +2745,101 @@ function showEmployeeDetails(empId) {
             });
         });
         
+        document.querySelectorAll('.view-salary').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const index = parseInt(this.getAttribute('data-index'));
+                viewSalaryRecord(index);
+            });
+        });
+        
         const modal = new bootstrap.Modal(getElement('employeeModal'));
+        modal.show();
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// View salary record
+function viewSalaryRecord(index) {
+    try {
+        const salaryRecord = salaryRecords[index];
+        if (!salaryRecord) {
+            throw new Error('Salary record not found');
+        }
+        
+        const employee = employees.find(emp => emp.id === salaryRecord.empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        const modalTitle = getElement('salaryModalTitle');
+        const modalBody = getElement('salaryModalBody');
+        
+        if (!modalTitle || !modalBody) return;
+        
+        modalTitle.textContent = `Salary Details - ${employee.name} - ${salaryRecord.month}`;
+        
+        modalBody.innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <p><strong>Employee:</strong> ${employee.name} (${employee.id})</p>
+                    <p><strong>Month:</strong> ${salaryRecord.month}</p>
+                    <p><strong>Shift:</strong> ${employee.shift === 'day' ? 'Day Shift' : 'Night Shift'}</p>
+                    <p><strong>Department:</strong> ${employee.department || 'N/A'}</p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Agreed Salary:</strong> Ksh ${employee.salary.toFixed(2)}</p>
+                    <p><strong>Working Days:</strong> ${employee.workingDays}</p>
+                    <p><strong>Payment Day:</strong> ${employee.paymentDay}</p>
+                    <p><strong>Status:</strong> ${employee.status === 'active' ? 'Active' : 'Inactive'}</p>
+                </div>
+            </div>
+            
+            <hr>
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>Attendance Summary</h5>
+                    <p>Working Days: ${salaryRecord.workingDays}</p>
+                    <p>Absent Days: ${salaryRecord.absentDays}</p>
+                    <p>Late Minutes: ${salaryRecord.lateMinutes} (${(salaryRecord.lateMinutes/60).toFixed(1)} hours)</p>
+                </div>
+                <div class="col-md-6">
+                    <h5>Salary Breakdown</h5>
+                    <p>Gross Salary: Ksh ${salaryRecord.grossSalary.toFixed(2)}</p>
+                    <p>Deductions: Ksh ${salaryRecord.deductions.toFixed(2)}</p>
+                    <p>Bonus: Ksh ${salaryRecord.bonus.toFixed(2)}</p>
+                </div>
+            </div>
+            
+            <hr>
+            
+            <div class="alert alert-success">
+                <h4>Net Salary: Ksh ${salaryRecord.netSalary.toFixed(2)}</h4>
+                <p class="mb-0">Status: ${salaryRecord.status === 'paid' ? 'Paid' : 'Pending'}</p>
+            </div>
+            
+            <div class="d-flex justify-content-end">
+                <button class="btn btn-primary me-2" id="emailSalaryBtn">Email Payslip</button>
+                <button class="btn btn-info me-2" id="exportSalaryBtn">Export Payslip</button>
+                <button class="btn btn-secondary" id="printSalaryBtn">Print Payslip</button>
+            </div>
+        `;
+        
+        // Add event listeners to buttons
+        getElement('emailSalaryBtn')?.addEventListener('click', function() {
+            emailPayslip(salaryRecord.empId, salaryRecord.month);
+        });
+        
+        getElement('exportSalaryBtn')?.addEventListener('click', function() {
+            exportPayslip(salaryRecord.empId, salaryRecord.month);
+        });
+        
+        getElement('printSalaryBtn')?.addEventListener('click', function() {
+            printPayslip(salaryRecord.empId, salaryRecord.month);
+        });
+        
+        const modal = new bootstrap.Modal(getElement('salaryModal'));
         modal.show();
     } catch (error) {
         showAlert(error.message, 'error');
@@ -3491,15 +2924,7 @@ function saveEditedDeduction() {
             updatedAt: new Date().toISOString()
         };
         
-        saveToLocalStorage();
-        
-        // Add to sync queue
-        syncQueue.push({
-            type: 'update_deduction',
-            data: deductions[index],
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
+        saveData();
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(getElement('editDeductionModal'));
@@ -3512,13 +2937,8 @@ function saveEditedDeduction() {
         // If showing employee details, refresh the view
         const modalTitle = getElement('employeeModalTitle');
         if (modalTitle && modalTitle.textContent.includes('Employee Details')) {
-            const empId = document.getElementById('modalEmpId').value;
+            const empId = getElement('modalEmpId').value;
             showEmployeeDetails(empId);
-        }
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
         }
     } catch (error) {
         showAlert(error.message, 'error');
@@ -3536,17 +2956,9 @@ function deleteDeductionRecord(index) {
             throw new Error('Invalid deduction index');
         }
         
-        // Add to sync queue before deleting (for sync purposes)
-        syncQueue.push({
-            type: 'delete_deduction',
-            data: deductions[index],
-            timestamp: new Date().toISOString()
-        });
-        updateSyncQueueAlert();
-        
         // Remove from local storage
         deductions.splice(index, 1);
-        saveToLocalStorage();
+        saveData();
         
         // Close modal
         const modal = bootstrap.Modal.getInstance(getElement('editDeductionModal'));
@@ -3559,13 +2971,8 @@ function deleteDeductionRecord(index) {
         // If showing employee details, refresh the view
         const modalTitle = getElement('employeeModalTitle');
         if (modalTitle && modalTitle.textContent.includes('Employee Details')) {
-            const empId = document.getElementById('modalEmpId').value;
+            const empId = getElement('modalEmpId').value;
             showEmployeeDetails(empId);
-        }
-        
-        // If online, try to sync immediately
-        if (navigator.onLine) {
-            processSyncQueue();
         }
     } catch (error) {
         showAlert(error.message, 'error');
@@ -4002,10 +3409,17 @@ function generateSalaryReport() {
             throw new Error('No active employees found');
         }
 
-        // Calculate salaries for all employees
-        const reportData = activeEmployees.map(employee => {
-            return calculateEmployeeSalaryForReport(employee, month);
-        });
+        // Get salary records for the selected month
+        const reportData = salaryRecords.filter(record => 
+            record.month === month && employees.some(emp => emp.id === record.empId && emp.status === 'active')
+        );
+
+        // If no salary records found, calculate them
+        if (reportData.length === 0) {
+            showAlert('No salary records found for this month. Calculating salaries now...', 'info');
+            calculateAllSalaries(month, false, false);
+            return;
+        }
 
         // Update summary
         updateSalarySummary(reportData, monthName, year);
@@ -4022,104 +3436,15 @@ function generateSalaryReport() {
     }
 }
 
-function calculateEmployeeSalaryForReport(employee, month) {
-    const [year, monthNum] = month.split('-').map(Number);
-    
-    // Filter attendance records for this employee and month
-    const monthAttendance = attendanceRecords.filter(record => {
-        try {
-            const [recordYear, recordMonth] = record.date.split('-').map(Number);
-            return record.empId === employee.id && recordYear === year && recordMonth === monthNum;
-        } catch (error) {
-            console.error('Error parsing attendance record date:', record.date, error);
-            return false;
-        }
-    });
-    
-    // Filter leave records for this employee and month
-    const monthLeaves = leaveRecords.filter(leave => {
-        try {
-            return leave.empId === employee.id && 
-                ((new Date(leave.startDate) <= new Date(year, monthNum - 1, 31)) && 
-                (new Date(leave.endDate) >= new Date(year, monthNum - 1, 1)));
-        } catch (error) {
-            console.error('Error parsing leave record dates:', leave.startDate, leave.endDate, error);
-            return false;
-        }
-    });
-    
-    // Calculate working days, absent days, late minutes
-    let workingDays = 0;
-    let absentDays = 0;
-    let lateMinutes = 0;
-    let leaveDays = 0;
-    
-    const daysInMonth = new Date(year, monthNum, 0).getDate();
-    for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${year}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        
-        // Check if on leave
-        const onLeave = monthLeaves.some(leave => 
-            dateStr >= leave.startDate && dateStr <= leave.endDate
-        );
-        
-        if (onLeave) {
-            leaveDays++;
-            continue;
-        }
-        
-        // Check attendance
-        const attendance = monthAttendance.find(record => record.date === dateStr);
-        
-        if (attendance) {
-            if (attendance.status === 'absent') {
-                absentDays++;
-            } else {
-                workingDays++;
-                if (attendance.status === 'late') {
-                    lateMinutes += attendance.minutesLate || 0;
-                }
-            }
-        } else {
-            absentDays++;
-        }
-    }
-    
-    // Calculate salary components
-    const dailySalary = employee.salary / employee.workingDays;
-    const lateDeduction = (lateMinutes / 60) * (dailySalary / 8); // Assuming 8-hour work day
-    const absentDeduction = absentDays * dailySalary;
-    
-    // Get employee's deductions
-    const empDeductions = deductions.filter(ded => ded.empId === employee.id);
-    const otherDeductions = empDeductions.reduce((sum, ded) => sum + ded.amount, 0);
-    
-    const totalDeductions = lateDeduction + absentDeduction + otherDeductions;
-    const netSalary = employee.salary - totalDeductions;
-    
-    return {
-        id: employee.id,
-        name: employee.name,
-        baseSalary: employee.salary,
-        deductions: totalDeductions,
-        netSalary: netSalary,
-        status: netSalary > 0 ? 'Pending' : 'Paid',
-        workingDays: workingDays,
-        absentDays: absentDays,
-        lateMinutes: lateMinutes,
-        leaveDays: leaveDays
-    };
-}
-
 function updateSalarySummary(reportData, monthName, year) {
     const summaryDiv = getElement('salarySummary');
     if (!summaryDiv) return;
     
-    const totalSalaries = reportData.reduce((sum, emp) => sum + emp.baseSalary, 0);
+    const totalSalaries = reportData.reduce((sum, emp) => sum + emp.grossSalary, 0);
     const totalDeductions = reportData.reduce((sum, emp) => sum + emp.deductions, 0);
     const totalNetPay = reportData.reduce((sum, emp) => sum + emp.netSalary, 0);
-    const pendingCount = reportData.filter(emp => emp.status === 'Pending').length;
-    const paidCount = reportData.filter(emp => emp.status === 'Paid').length;
+    const pendingCount = reportData.filter(emp => emp.status === 'calculated').length;
+    const paidCount = reportData.filter(emp => emp.status === 'paid').length;
     
     summaryDiv.innerHTML = `
         <h5>${monthName} ${year} Summary</h5>
@@ -4136,7 +3461,7 @@ function updatePendingPayments(reportData) {
     const pendingDiv = getElement('pendingPayments');
     if (!pendingDiv) return;
     
-    const pendingEmployees = reportData.filter(emp => emp.status === 'Pending');
+    const pendingEmployees = reportData.filter(emp => emp.status === 'calculated');
     
     if (pendingEmployees.length === 0) {
         pendingDiv.innerHTML = '<p>No pending payments</p>';
@@ -4145,12 +3470,15 @@ function updatePendingPayments(reportData) {
     
     let html = '<ul class="list-group">';
     pendingEmployees.forEach(emp => {
-        html += `
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-                ${emp.name} (${emp.id})
-                <span class="badge bg-primary rounded-pill">Ksh ${emp.netSalary.toFixed(2)}</span>
-            </li>
-        `;
+        const employee = employees.find(e => e.id === emp.empId);
+        if (employee) {
+            html += `
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    ${employee.name} (${employee.id})
+                    <span class="badge bg-primary rounded-pill">Ksh ${emp.netSalary.toFixed(2)}</span>
+                </li>
+            `;
+        }
     });
     html += '</ul>';
     
@@ -4163,17 +3491,20 @@ function updateDetailedReport(reportData) {
     
     tbody.innerHTML = '';
     
-    reportData.forEach(emp => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${emp.id}</td>
-            <td>${emp.name}</td>
-            <td>Ksh ${emp.baseSalary.toFixed(2)}</td>
-            <td>Ksh ${emp.deductions.toFixed(2)}</td>
-            <td>Ksh ${emp.netSalary.toFixed(2)}</td>
-            <td class="${emp.status === 'Pending' ? 'text-warning' : 'text-success'}">${emp.status}</td>
-        `;
-        tbody.appendChild(row);
+    reportData.forEach(record => {
+        const employee = employees.find(emp => emp.id === record.empId);
+        if (employee) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${employee.id}</td>
+                <td>${employee.name}</td>
+                <td>Ksh ${record.grossSalary.toFixed(2)}</td>
+                <td>Ksh ${record.deductions.toFixed(2)}</td>
+                <td>Ksh ${record.netSalary.toFixed(2)}</td>
+                <td class="${record.status === 'calculated' ? 'text-warning' : 'text-success'}">${record.status === 'calculated' ? 'Pending' : 'Paid'}</td>
+            `;
+            tbody.appendChild(row);
+        }
     });
 }
 
@@ -4270,6 +3601,325 @@ function printSalaryReport() {
             </html>
         `);
         printWindow.document.close();
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Mark all employees as present for today
+function markAllEmployeesPresent() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const activeEmployees = employees.filter(emp => emp.status === 'active');
+        
+        if (activeEmployees.length === 0) {
+            showAlert('No active employees found', 'warning');
+            return;
+        }
+        
+        if (!confirm(`Mark all ${activeEmployees.length} active employees as present for today?`)) {
+            return;
+        }
+        
+        activeEmployees.forEach(employee => {
+            // Check if attendance already recorded for today
+            const existingRecord = attendanceRecords.find(record => 
+                record.empId === employee.id && record.date === today
+            );
+            
+            if (!existingRecord) {
+                const attendanceRecord = {
+                    empId: employee.id,
+                    date: today,
+                    arrivalTime: '09:00', // Default arrival time
+                    shiftType: employee.shift,
+                    status: 'on_time',
+                    minutesLate: 0,
+                    recordedAt: new Date().toISOString()
+                };
+                
+                attendanceRecords.push(attendanceRecord);
+            }
+        });
+        
+        saveData();
+        showAlert(`Marked all ${activeEmployees.length} employees as present for today`);
+        updateLateEmployeesList();
+        updateAbsentEmployeesList();
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Export all employees
+function exportAllEmployees() {
+    try {
+        if (employees.length === 0) {
+            throw new Error('No employees to export');
+        }
+        
+        // Prepare data for export
+        const exportData = employees.map(emp => ({
+            id: emp.id,
+            name: emp.name,
+            phone: emp.phone,
+            email: emp.email || '',
+            shift: emp.shift === 'day' ? 'Day Shift' : 'Night Shift',
+            workingDays: emp.workingDays,
+            salary: emp.salary,
+            paymentDay: emp.paymentDay,
+            department: emp.department || '',
+            status: emp.status === 'active' ? 'Active' : 'Inactive',
+            registered: formatDate(emp.createdAt),
+            lastUpdated: emp.updatedAt ? formatDate(emp.updatedAt) : 'N/A'
+        }));
+        
+        exportToCSV(exportData, 'employee_directory.csv');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Print employee directory
+function printEmployeeDirectory() {
+    try {
+        if (employees.length === 0) {
+            throw new Error('No employees to print');
+        }
+        
+        // Create HTML for directory
+        let html = `
+            <html>
+                <head>
+                    <title>Employee Directory</title>
+                    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+                    <style>
+                        @media print {
+                            body { padding: 20px; }
+                            .no-print { display: none !important; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h2 class="text-center mb-4">Employee Directory</h2>
+                    <p class="text-end mb-4">Generated on: ${formatDate(new Date().toISOString())}</p>
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Email</th>
+                                <th>Shift</th>
+                                <th>Department</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        employees.forEach(emp => {
+            html += `
+                <tr>
+                    <td>${emp.id}</td>
+                    <td>${emp.name}</td>
+                    <td>${emp.phone}</td>
+                    <td>${emp.email || 'N/A'}</td>
+                    <td>${emp.shift === 'day' ? 'Day' : 'Night'}</td>
+                    <td>${emp.department || 'N/A'}</td>
+                    <td>${emp.status === 'active' ? 'Active' : 'Inactive'}</td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                    <div class="no-print text-center mt-4">
+                        <button onclick="window.print()" class="btn btn-primary">Print Directory</button>
+                        <button onclick="window.close()" class="btn btn-secondary ms-2">Close</button>
+                    </div>
+                    <script>
+                        // Auto-print when window loads
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+            </html>
+        `;
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(html);
+        printWindow.document.close();
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Export all data
+function exportAllData() {
+    try {
+        const data = {
+            employees: employees,
+            attendanceRecords: attendanceRecords,
+            leaveRecords: leaveRecords,
+            deductions: deductions,
+            salaryRecords: salaryRecords,
+            settings: settings,
+            exportedAt: new Date().toISOString()
+        };
+        
+        const dataStr = JSON.stringify(data, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `employee_management_system_backup_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showAlert('All data exported successfully!');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Import data
+function importData() {
+    try {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json';
+        
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (!data.employees || !data.attendanceRecords || !data.leaveRecords || !data.deductions || !data.settings) {
+                        throw new Error('Invalid data format');
+                    }
+                    
+                    if (confirm('This will overwrite all current data. Are you sure?')) {
+                        employees = data.employees;
+                        attendanceRecords = data.attendanceRecords;
+                        leaveRecords = data.leaveRecords;
+                        deductions = data.deductions;
+                        salaryRecords = data.salaryRecords || [];
+                        settings = data.settings;
+                        
+                        saveData();
+                        showAlert('Data imported successfully! The page will now refresh.');
+                        setTimeout(() => location.reload(), 1000);
+                    }
+                } catch (error) {
+                    showAlert('Error importing data: ' + error.message, 'error');
+                }
+            };
+            reader.readAsText(file);
+        });
+        
+        fileInput.click();
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Update salary reports panel
+function updateSalaryReports() {
+    try {
+        const reportsBody = getElement('salaryReportsBody');
+        if (!reportsBody) return;
+        
+        reportsBody.innerHTML = '';
+        
+        if (salaryRecords.length === 0) {
+            reportsBody.innerHTML = '<tr><td colspan="6" class="text-center">No salary records found</td></tr>';
+            return;
+        }
+        
+        // Group by month
+        const monthlyReports = {};
+        salaryRecords.forEach(record => {
+            if (!monthlyReports[record.month]) {
+                monthlyReports[record.month] = [];
+            }
+            monthlyReports[record.month].push(record);
+        });
+        
+        // Display each month's records
+        Object.keys(monthlyReports).sort().reverse().forEach(month => {
+            const monthRecords = monthlyReports[month];
+            const [year, monthNum] = month.split('-');
+            const monthName = new Date(year, monthNum - 1, 1).toLocaleString('default', { month: 'long' });
+            
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${monthName} ${year}</td>
+                <td>${monthRecords.length}</td>
+                <td>Ksh ${monthRecords.reduce((sum, r) => sum + r.grossSalary, 0).toFixed(2)}</td>
+                <td>Ksh ${monthRecords.reduce((sum, r) => sum + r.deductions, 0).toFixed(2)}</td>
+                <td>Ksh ${monthRecords.reduce((sum, r) => sum + r.netSalary, 0).toFixed(2)}</td>
+                <td>
+                    <span class="badge ${monthRecords.every(r => r.status === 'paid') ? 'bg-success' : 'bg-warning'}">
+                        ${monthRecords.every(r => r.status === 'paid') ? 'Paid' : 'Pending'}
+                    </span>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-primary view-monthly-report" data-month="${month}">
+                        <i class="bi bi-eye"></i> View
+                    </button>
+                </td>
+            `;
+            reportsBody.appendChild(row);
+        });
+        
+        // Add event listeners to view buttons
+        document.querySelectorAll('.view-monthly-report').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const month = this.getAttribute('data-month');
+                viewMonthlyReport(month);
+            });
+        });
+    } catch (error) {
+        console.error('Error updating salary reports:', error);
+    }
+}
+
+// View monthly report
+function viewMonthlyReport(month) {
+    try {
+        const [year, monthNum] = month.split('-');
+        const monthName = new Date(year, monthNum - 1, 1).toLocaleString('default', { month: 'long' });
+        
+        const monthRecords = salaryRecords.filter(record => record.month === month);
+        if (monthRecords.length === 0) {
+            throw new Error('No records found for this month');
+        }
+        
+        // Set the report month dropdown
+        const reportMonth = getElement('reportMonth');
+        if (reportMonth) {
+            reportMonth.value = month;
+        }
+        
+        // Generate the report
+        generateSalaryReport();
+        
+        // Scroll to the reports section
+        const reportsSection = getElement('salaryReportsSection');
+        if (reportsSection) {
+            reportsSection.scrollIntoView({ behavior: 'smooth' });
+        }
     } catch (error) {
         showAlert(error.message, 'error');
     }
