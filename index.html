@@ -12,8 +12,6 @@
     <link rel="stylesheet" href="management.css">
     <!-- Include LZ-String for data compression -->
     <script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
-    <!-- Include Supabase client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="light-mode">
     <div class="container-fluid">
@@ -26,9 +24,6 @@
                 <div>
                     <button id="toggleDarkMode" class="btn btn-sm btn-light">
                         <i class="bi bi-moon-fill"></i> Dark Mode
-                    </button>
-                    <button id="syncData" class="btn btn-sm btn-light ms-2">
-                        <i class="bi bi-cloud-arrow-up-fill"></i> Sync Data
                     </button>
                     <span id="connectionStatus" class="badge bg-success ms-2">
                         <i class="bi bi-wifi"></i> Online
@@ -65,10 +60,10 @@
                         <form id="employeeForm">
                             <div class="row mb-3">
                                 <div class="col-md-6">
-                                  <label for="empId" class="form-label">Employee ID</label>
-                                  <input type="text" class="form-control" id="empId" pattern="[A-Za-z0-9\-_@#$%&*!?+=() ]+" required>
-                                  <small class="text-muted">Can contain letters, numbers, and special characters</small>
-                                 </div>
+                                    <label for="empId" class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" id="empId" required>
+                                    <small class="text-muted">Can contain any characters</small>
+                                </div>
                                 <div class="col-md-6">
                                     <label for="fullName" class="form-label">Full Name</label>
                                     <input type="text" class="form-control" id="fullName" required>
@@ -166,26 +161,23 @@
                                     </select>
                                 </div>
                             </div>
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label for="departureTime" class="form-label">Departure Time</label>
+                                    <input type="time" class="form-control" id="departureTime">
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="approvedOvertime" class="form-label">Approved Overtime (mins)</label>
+                                    <input type="number" class="form-control" id="approvedOvertime" min="0" value="0">
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="overstayMinutes" class="form-label">Overstay Minutes</label>
+                                    <input type="number" class="form-control" id="overstayMinutes" readonly>
+                                </div>
+                            </div>
                             <button type="submit" class="btn btn-primary">Record Attendance</button>
                         </form>
                         <div class="mt-4" id="attendanceStatus"></div>
-
-
-                        <div class="row mb-3">
-    <div class="col-md-4">
-        <label for="departureTime" class="form-label">Departure Time</label>
-        <input type="time" class="form-control" id="departureTime">
-    </div>
-    <div class="col-md-4">
-        <label for="approvedOvertime" class="form-label">Approved Overtime (mins)</label>
-        <input type="number" class="form-control" id="approvedOvertime" min="0" value="0">
-    </div>
-    <div class="col-md-4">
-        <label for="overstayMinutes" class="form-label">Overstay Minutes</label>
-        <input type="number" class="form-control" id="overstayMinutes" readonly>
-    </div>
-</div>
-
                     </div>
 
                     <!-- Late Employees -->
@@ -349,7 +341,7 @@
                             <input type="checkbox" class="form-check-input" id="includeBonus">
                             <label class="form-check-label" for="includeBonus">Include Performance Bonus</label>
                         </div>
-                        <button id="calculateSalaryBtn" class="btn btn-primary" onclick="handleSalaryCalculation()">Calculate Salary</button>
+                        <button id="calculateSalaryBtn" class="btn btn-primary">Calculate Salary</button>
                         
                         <div id="salaryResult" class="mt-4 p-3 bg-light rounded d-none">
                             <div class="mb-3">
@@ -377,11 +369,11 @@
                                 <input type="month" class="form-control" id="reportMonth">
                             </div>
                             <div class="col-md-6">
-                                <button id="generateReportBtn" class="btn btn-primary mt-4" onclick="generateSalaryReport()">Generate Report</button>
-                                <button id="exportFullReport" class="btn btn-success mt-4 ms-2" onclick="exportSalaryReport()">
+                                <button id="generateReportBtn" class="btn btn-primary mt-4">Generate Report</button>
+                                <button id="exportFullReport" class="btn btn-success mt-4 ms-2">
                                     <i class="bi bi-download"></i> Export Full Report
                                 </button>
-                                 <button id="printFullReport" class="btn btn-danger mt-4 ms-2" onclick="printSalaryReport()">
+                                <button id="printFullReport" class="btn btn-danger mt-4 ms-2">
                                     <i class="bi bi-printer-fill"></i> Print
                                 </button>
                             </div>
@@ -450,11 +442,11 @@
                                 <div id="recordEmployeeSuggestions" class="suggestions-dropdown"></div>
                             </div>
                             <div class="col-md-6">
-                                <button id="fetchRecordsBtn" class="btn btn-primary mt-4" onclick="fetchEmployeeRecords()">Fetch Records</button>
-                                <button id="exportEmployeeRecords" class="btn btn-success mt-4 ms-2" onclick="exportEmployeeRecords()">
+                                <button id="fetchRecordsBtn" class="btn btn-primary mt-4">Fetch Records</button>
+                                <button id="exportEmployeeRecords" class="btn btn-success mt-4 ms-2">
                                     <i class="bi bi-download"></i> Export as PDF
                                 </button>
-                                <button id="printEmployeeRecord" class="btn btn-danger mt-4 ms-2" onclick="printEmployeeRecord()">
+                                <button id="printEmployeeRecord" class="btn btn-danger mt-4 ms-2">
                                     <i class="bi bi-printer-fill"></i> Print
                                 </button>
                             </div>
@@ -581,44 +573,38 @@
                     <div class="tab-pane fade" id="settings">
                         <h3>System Settings</h3>
                         <div class="row">
-<div class="card mb-4">
-    <div class="card-header bg-primary text-white">
-        <h5 class="mb-0">Database Settings (MySQL)</h5>
-    </div>
-    <div class="card-body">
-        <div class="row mb-3">
-            <div class="col-md-6">
-                <label for="dbHost" class="form-label">Host</label>
-                <input type="text" class="form-control" id="dbHost" placeholder="localhost">
-            </div>
-            <div class="col-md-6">
-                <label for="dbPort" class="form-label">Port</label>
-                <input type="number" class="form-control" id="dbPort" placeholder="3306" value="3306">
-            </div>
-        </div>
-        <div class="row mb-3">
-            <div class="col-md-6">
-                <label for="dbUser" class="form-label">Username</label>
-                <input type="text" class="form-control" id="dbUser" placeholder="username">
-            </div>
-            <div class="col-md-6">
-                <label for="dbPassword" class="form-label">Password</label>
-                <input type="password" class="form-control" id="dbPassword" placeholder="password">
-            </div>
-        </div>
-        <div class="mb-3">
-            <label for="dbName" class="form-label">Database Name</label>
-            <input type="text" class="form-control" id="dbName" placeholder="employee_db">
-        </div>
-        <button id="saveDbSettings" class="btn btn-primary">
-            <i class="bi bi-save"></i> Save Database Settings
-        </button>
-        <button id="testDbConnection" class="btn btn-secondary ms-2">
-            <i class="bi bi-plug"></i> Test Connection
-        </button>
-        <div id="dbConnectionStatus" class="alert mt-3 d-none"></div>
-    </div>
-</div>
+                            <div class="col-md-6">
+                                <div class="card mb-4">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Local Storage Management</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label class="form-label">Storage Usage</label>
+                                            <div class="progress mb-2">
+                                                <div id="storageUsageBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                            </div>
+                                            <div class="d-flex justify-content-between">
+                                                <small id="storageUsed">0 KB used</small>
+                                                <small id="storageRemaining">0 KB remaining</small>
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <button id="clearStorageBtn" class="btn btn-danger me-2">
+                                                <i class="bi bi-trash"></i> Clear Storage
+                                            </button>
+                                            <button id="exportDataBtn" class="btn btn-secondary">
+                                                <i class="bi bi-download"></i> Export All Data
+                                            </button>
+                                        </div>
+                                        <div class="mb-3">
+                                            <button id="importDataBtn" class="btn btn-secondary">
+                                                <i class="bi bi-upload"></i> Import Data
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="col-md-6">
                                 <div class="card mb-4">
                                     <div class="card-header bg-primary text-white">
@@ -644,45 +630,6 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="card">
-                            <div class="card-header bg-primary text-white">
-                                <h5 class="mb-0">Data Management</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="alert alert-warning">
-                                    <strong>Warning:</strong> These actions cannot be undone. Backup your data before proceeding.
-                                </div>
-                                <div class="row">
-                                    <div class="col-md-4">
-                                        <button id="backupDataBtn" class="btn btn-success w-100 mb-2">
-                                            <i class="bi bi-cloud-upload"></i> Backup to Cloud
-                                        </button>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <button id="restoreDataBtn" class="btn btn-info w-100 mb-2">
-                                            <i class="bi bi-cloud-download"></i> Restore from Cloud
-                                        </button>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <button id="clearDataBtn" class="btn btn-danger w-100 mb-2">
-                                            <i class="bi bi-trash"></i> Clear Local Data
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="row mt-3">
-                                    <div class="col-md-6">
-                                        <button id="exportAllDataBtn" class="btn btn-secondary w-100">
-                                            <i class="bi bi-download"></i> Export All Data
-                                        </button>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <button id="importAllDataBtn" class="btn btn-secondary w-100">
-                                            <i class="bi bi-upload"></i> Import All Data
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -703,6 +650,29 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     <button type="button" class="btn btn-primary" id="saveEmployeeChanges">Save Changes</button>
+                    <button type="button" class="btn btn-warning" id="editEmployeeIdBtn">Edit ID</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Employee ID Modal -->
+    <div class="modal fade" id="editIdModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Employee ID</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editIdForm">
+                        <input type="hidden" id="currentEmpId">
+                        <div class="mb-3">
+                            <label for="newEmpId" class="form-label">New Employee ID</label>
+                            <input type="text" class="form-control" id="newEmpId" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Update ID</button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -763,6 +733,18 @@
                                 <option value="day">Day Shift</option>
                                 <option value="night">Night Shift</option>
                             </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editDepartureTime" class="form-label">Departure Time</label>
+                            <input type="time" class="form-control" id="editDepartureTime">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editApprovedOvertime" class="form-label">Approved Overtime (mins)</label>
+                            <input type="number" class="form-control" id="editApprovedOvertime" min="0" value="0">
+                        </div>
+                        <div class="mb-3">
+                            <label for="editOverstayMinutes" class="form-label">Overstay Minutes</label>
+                            <input type="number" class="form-control" id="editOverstayMinutes" readonly>
                         </div>
                         <button type="submit" class="btn btn-primary">Save Changes</button>
                         <button type="button" class="btn btn-danger ms-2" id="deleteAttendanceBtn">Delete Record</button>
@@ -878,52 +860,31 @@
 
     <!-- Chatbot Interface -->
     <div class="chatbot-container">
-    <button class="btn btn-primary chatbot-toggle" id="chatbotToggle">
-        <i class="bi bi-robot"></i> Help Bot
-    </button>
-        <div class="chatbot-window">
+        <button class="btn btn-primary chatbot-toggle" id="chatbotToggle">
+            <i class="bi bi-robot"></i> Help Bot
+        </button>
         <div class="chatbot-window" id="chatbotWindow">
-        <div class="chatbot-header">
-            <h5>Employee Help Bot</h5>
-            <button class="btn btn-sm btn-close chatbot-close" id="chatbotClose" ></button>
-        </div>
-        <div class="chatbot-messages" id="chatbotMessages">
-            <div class="chatbot-message bot-message">
-                Hello! I'm your employee help assistant. How can I help you today?
+            <div class="chatbot-header">
+                <h5>Employee Help Bot</h5>
+                <button class="btn btn-sm btn-close chatbot-close" id="chatbotClose"></button>
             </div>
-        </div>
-        <div class="chatbot-input">
-            <input type="text" id="chatbotQuery" placeholder="Ask about employees...">
-            <button class="btn btn-sm btn-primary" id="sendChatbotQuery">
-                <i class="bi bi-send-fill"></i>
-            </button>
-        </div>
-    </div>
-</div>
-
-    <!-- Install App Prompt -->
-    <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
-        <div id="installPrompt" class="toast d-none" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="toast-header">
-                <strong class="me-auto">Install App</strong>
-                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            <div class="chatbot-messages" id="chatbotMessages">
+                <div class="chatbot-message bot-message">
+                    Hello! I'm your employee help assistant. How can I help you today?
+                </div>
             </div>
-            <div class="toast-body">
-                Add Bamburi Tilapia Hotel to your home screen for easy access!
-                <button id="installButton" class="btn btn-primary btn-sm mt-2">Install</button>
+            <div class="chatbot-input">
+                <input type="text" id="chatbotQuery" placeholder="Ask about employees...">
+                <button class="btn btn-sm btn-primary" id="sendChatbotQuery">
+                    <i class="bi bi-send-fill"></i>
+                </button>
             </div>
         </div>
     </div>
 
     <!-- Offline Alert -->
     <div id="offlineAlert" class="alert alert-warning position-fixed top-0 start-0 w-100 text-center d-none" style="z-index: 1100;">
-        <strong>Offline Mode:</strong> You are currently offline. Changes will be synced when connection is restored.
-    </div>
-
-    <!-- Sync Queue Alert -->
-    <div id="syncQueueAlert" class="alert alert-info position-fixed top-0 start-0 w-100 text-center d-none" style="z-index: 1100;">
-        <strong>Pending Sync:</strong> <span id="syncQueueCount">0</span> changes waiting to be synced.
-        <button id="retrySyncBtn" class="btn btn-sm btn-primary ms-2">Retry Now</button>
+        <strong>Offline Mode:</strong> You are currently offline. Changes will be saved locally.
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -932,40 +893,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="management.js"></script>
     <script>
-        // Register service worker for PWA
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').then(registration => {
-                    console.log('ServiceWorker registration successful');
-                }).catch(err => {
-                    console.log('ServiceWorker registration failed: ', err);
-                });
-            });
-        }
-
-        // Show install prompt
-        let deferredPrompt;
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            const installPrompt = new bootstrap.Toast(document.getElementById('installPrompt'));
-            installPrompt.show();
-        });
-
-        document.getElementById('installButton').addEventListener('click', () => {
-            if (deferredPrompt) {
-                deferredPrompt.prompt();
-                deferredPrompt.userChoice.then((choiceResult) => {
-                    if (choiceResult.outcome === 'accepted') {
-                        console.log('User accepted install prompt');
-                    } else {
-                        console.log('User dismissed install prompt');
-                    }
-                    deferredPrompt = null;
-                });
-            }
-        });
-
         // Check online status
         function updateOnlineStatus() {
             const isOnline = navigator.onLine;
