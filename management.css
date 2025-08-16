@@ -322,31 +322,58 @@ body.dark-mode .chatbot-input input {
     padding: 15px;
     margin-bottom: 15px;
     border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .summary-card.total {
     border-left-color: #0d6efd;
     background-color: #e7f1ff;
+    border-left: 4px solid #0d6efd;
 }
 
 .summary-card.paid {
     border-left-color: #28a745;
     background-color: #e6f7eb;
+    border-left: 4px solid #28a745;
 }
 
 .summary-card.pending {
     border-left-color: #ffc107;
     background-color: #fff8e6;
+    border-left: 4px solid #ffc107;
 }
 
 .summary-card h5 {
     margin-bottom: 10px;
     font-size: 1.1rem;
+    color: #6c757d;
 }
 
 .summary-card .amount {
     font-size: 1.5rem;
     font-weight: bold;
+}
+
+/* Employee Records Styles */
+#employeeRecordsBody .card {
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#employeeRecordsBody .card-header {
+    font-weight: 600;
+}
+
+#employeeRecordsBody table {
+    font-size: 0.9rem;
+}
+
+#upcomingPaymentsList tr.urgent {
+    background-color: rgba(220, 53, 69, 0.1);
+}
+
+#upcomingPaymentsList tr.due-soon {
+    background-color: rgba(255, 193, 7, 0.1);
 }
 
 /* Table actions */
@@ -371,6 +398,29 @@ body.dark-mode .chatbot-input input {
     position: relative;
     height: 300px;
     width: 100%;
+}
+
+/* Payment status indicators */
+.payment-status {
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.payment-status.due-soon {
+    background-color: #ffc107;
+    color: #000;
+}
+
+.payment-status.urgent {
+    background-color: #dc3545;
+    color: #fff;
+}
+
+.payment-status.upcoming {
+    background-color: #17a2b8;
+    color: #fff;
 }
 
 /* Dark mode toggle switch */
