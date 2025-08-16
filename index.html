@@ -41,8 +41,11 @@
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#lateEmployees">Late Employees</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#absentEmployees">Absent Employees</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#leaveDays">Leave/Rest Days</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#temporaryLeaves">Temporary Leaves</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#employeeComments">Employee Comments</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#salaryCalc">Salary Calculation</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#salaryReports">Salary Reports</button>
+                    <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#salaryReminders">Salary Reminders</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#employeeRecords">Employee Records</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#search">Search Employees</button>
                     <button class="list-group-item list-group-item-action" data-bs-toggle="tab" data-bs-target="#deregister">Deregister Employee</button>
@@ -78,8 +81,8 @@
                                     <label for="shiftType" class="form-label">Shift Type</label>
                                     <select class="form-select" id="shiftType" required>
                                         <option value="">Select Shift</option>
-                                        <option value="day">Day Shift (09:30 AM)</option>
-                                        <option value="night">Night Shift (09:30 PM)</option>
+                                        <option value="day">Day Shift (09:30 AM - 10:00 PM)</option>
+                                        <option value="night">Night Shift (09:30 PM - 09:30 AM)</option>
                                     </select>
                                 </div>
                             </div>
@@ -95,9 +98,20 @@
                             </div>
                             <div class="row mb-3">
                                 <div class="col-md-6">
-                                    <label for="paymentDay" class="form-label">Payment Day of Month</label>
-                                    <input type="number" class="form-control" id="paymentDay" min="1" max="31" required>
+                                    <label for="paymentFrequency" class="form-label">Payment Frequency</label>
+                                    <select class="form-select" id="paymentFrequency" required>
+                                        <option value="weekly">Weekly</option>
+                                        <option value="biweekly">Every 2 Weeks</option>
+                                        <option value="monthly">Monthly</option>
+                                    </select>
                                 </div>
+                                <div class="col-md-6">
+                                    <label for="paymentDay" class="form-label">Payment Day</label>
+                                    <input type="number" class="form-control" id="paymentDay" min="1" max="31" required>
+                                    <small class="text-muted">Day of month for monthly payments</small>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label for="department" class="form-label">Department</label>
                                     <select class="form-select" id="department" required>
@@ -108,19 +122,217 @@
                                         <option value="other">Other</option>
                                     </select>
                                 </div>
+                                <div class="col-md-6">
+                                    <label for="photo" class="form-label">Photo (optional)</label>
+                                    <input type="file" class="form-control" id="photo" accept="image/*">
+                                </div>
                             </div>
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label for="email" class="form-label">Email (optional)</label>
                                     <input type="email" class="form-control" id="email">
                                 </div>
-                                <div class="col-md-6">
-                                    <label for="photo" class="form-label">Photo (optional)</label>
-                                    <input type="file" class="form-control" id="photo" accept="image/*">
-                                </div>
                             </div>
                             <button type="submit" class="btn btn-primary">Register Employee</button>
                         </form>
+                    </div>
+
+                     <!-- Temporary Leaves Panel -->
+                    <div class="tab-pane fade" id="temporaryLeaves">
+                        <h3>Temporary Leaves</h3>
+                        <form id="temporaryLeaveForm">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="tempLeaveEmpId" class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" id="tempLeaveEmpId" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="tempLeaveDate" class="form-label">Date</label>
+                                    <input type="date" class="form-control" id="tempLeaveDate" required>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="tempLeaveStartTime" class="form-label">Leave Time</label>
+                                    <input type="time" class="form-control" id="tempLeaveStartTime" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="tempLeaveExpectedReturn" class="form-label">Expected Return Time</label>
+                                    <input type="time" class="form-control" id="tempLeaveExpectedReturn" required>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <label for="tempLeaveReason" class="form-label">Reason</label>
+                                    <textarea class="form-control" id="tempLeaveReason" rows="2" required></textarea>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Record Temporary Leave</button>
+                        </form>
+                        <div class="mt-4">
+                            <h4>Active Temporary Leaves</h4>
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Employee ID</th>
+                                        <th>Name</th>
+                                        <th>Leave Time</th>
+                                        <th>Expected Return</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="temporaryLeavesList">
+                                    <!-- Will be populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Employee Comments Panel -->
+                    <div class="tab-pane fade" id="employeeComments">
+                        <h3>Employee Comments & Performance</h3>
+                        <form id="commentForm">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="commentEmpId" class="form-label">Employee ID</label>
+                                    <input type="text" class="form-control" id="commentEmpId" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="commentType" class="form-label">Comment Type</label>
+                                    <select class="form-select" id="commentType" required>
+                                        <option value="positive">Positive</option>
+                                        <option value="negative">Negative</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="commentRating" class="form-label">Rating (1-5)</label>
+                                    <select class="form-select" id="commentRating" required>
+                                        <option value="5">★★★★★</option>
+                                        <option value="4">★★★★☆</option>
+                                        <option value="3">★★★☆☆</option>
+                                        <option value="2">★★☆☆☆</option>
+                                        <option value="1">★☆☆☆☆</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Rating Preview</label>
+                                    <div class="star-rating" id="ratingPreview">★★★★★</div>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <label for="commentText" class="form-label">Comment</label>
+                                    <textarea class="form-control" id="commentText" rows="3" required></textarea>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Submit Comment</button>
+                        </form>
+                        <div class="mt-4">
+                            <h4>Performance Insights</h4>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="chart-container">
+                                        <canvas id="commentsChart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <h5 class="mb-0">Performance Analysis</h5>
+                                        </div>
+                                        <div class="card-body" id="performanceInsights">
+                                            <p>Submit comments to generate performance insights</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- Salary Reminders Panel -->
+                    <div class="tab-pane fade" id="salaryReminders">
+                        <h3>Salary Payment Reminders</h3>
+                        <div class="alert alert-info">
+                            Upcoming salary payment dates and savings tracker
+                        </div>
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Upcoming Payments</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <table class="table table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>Payment Date</th>
+                                                    <th>Frequency</th>
+                                                    <th>Employees</th>
+                                                    <th>Amount Needed</th>
+                                                    <th>Days Left</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="upcomingPaymentsList">
+                                                <!-- Will be populated by JavaScript -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-0">Monthly Savings Tracker</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="dailySavingsAmount" class="form-label">Daily Savings Amount (Ksh)</label>
+                                            <input type="number" class="form-control" id="dailySavingsAmount" min="0" value="0">
+                                        </div>
+                                        <div id="savingsStatus" class="alert alert-info">
+                                            Enter daily savings amount to see projections
+                                        </div>
+                                        <div class="chart-container" style="height: 200px;">
+                                            <canvas id="savingsChart"></canvas>
+                                        </div>
+                                        <button id="updateSavingsBtn" class="btn btn-primary mt-3">Update Projections</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0">Payment Analytics</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="summary-card total">
+                                            <h5>Total Monthly Salaries</h5>
+                                            <div class="amount" id="totalMonthlySalaries">Ksh 0.00</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="summary-card pending">
+                                            <h5>Daily Savings Needed</h5>
+                                            <div class="amount" id="dailySavingsNeeded">Ksh 0.00</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="summary-card paid">
+                                            <h5>Current Savings</h5>
+                                            <div class="amount" id="currentSavings">Ksh 0.00</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Attendance -->
@@ -461,6 +673,22 @@
                             </div>
                         </div>
                     </div>
+
+                     <!-- Temporary Leave Modal -->
+    <div class="modal fade" id="temporaryLeaveModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Record Temporary Leave</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Form moved to the main panel -->
+                </div>
+            </div>
+        </div>
+    </div>
+
 
                     <!-- Search Employees -->
                     <div class="tab-pane fade" id="search">
