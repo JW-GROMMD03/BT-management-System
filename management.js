@@ -2,8 +2,11 @@
 let employees = [];
 let attendanceRecords = [];
 let leaveRecords = [];
+let temporaryLeaves = [];
+let salaryReminders = [];
 let deductions = [];
-let salaryRecords = []; // Added for salary tracking
+let comments = [];
+let salaryRecords = []; 
 let settings = {
     enableNotifications: true,
     enableEmailNotifications: false,
@@ -22,7 +25,17 @@ document.addEventListener('DOMContentLoaded', function() {
     loadData();
     setupEventListeners();
     updateStorageInfo();
+     updateSalaryReminders();
+     updateEmployeeLeaveStatus();
+    checkOverstayedLeaves();
+
+     // Update every 6 hours
+setInterval(updateSalaryReminders, 6 * 60 * 60 * 1000);
+
+// Also update when the salary reminders tab is shown
+document.querySelector('[data-bs-target="#salaryReminders"]')?.addEventListener('click', updateSalaryReminders);
     
+
     // Set default dates
     const today = new Date().toISOString().split('T')[0];
     const attendanceDate = getElement('attendanceDate');
@@ -33,11 +46,69 @@ document.addEventListener('DOMContentLoaded', function() {
     updateAbsentEmployeesList();
     updateLeaveDaysList();
     updateSalaryReports();
+     // Update leave statuses
+    updateEmployeeLeaveStatus();
+    
+    // Check for overstayed leaves
+    checkOverstayedLeaves();
+    
+    // Calculate salary reminders
+    calculateSalaryReminders();
+
+     setInterval(checkOverstayedLeaves, 60000); // Check every minute
+    setInterval(updateSalaryReminders, 86400000)
+    // Initialize quick search functionality
+    initQuickSearch();
 });
+
+// Initialize quick search functionality
+function initQuickSearch() {
+    const searchInput = getElement('quickSearchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', handleQuickSearch);
+    }
+    
+    // Add event listeners for the new buttons
+    document.getElementById('updateProjectionBtn')?.addEventListener('click', updateSalaryReminders);
+    document.getElementById('viewTrendsBtn')?.addEventListener('click', viewSalaryTrends);
+    document.getElementById('printRemindersBtn')?.addEventListener('click', printSalaryReminders);
+    document.getElementById('exportRemindersBtn')?.addEventListener('click', exportSalaryRemindersCSV);
+    document.getElementById('notifyLateBtn')?.addEventListener('click', notifyLateEmployeesFromReminders);
+    document.getElementById('notifyAbsentBtn')?.addEventListener('click', notifyAbsentEmployeesFromReminders);
+}
+
 
 // Load data from localStorage
 function loadData() {
     try {
+
+        // Load all data with compression
+        const keys = [
+            'employees', 'attendance', 'temporaryLeaves', 'salaryReminders',
+            'leaveRecords', 'deductions', 'salaryRecords', 'comments'
+        ];
+        
+        keys.forEach(key => {
+            const compressed = localStorage.getItem(key);
+            if (compressed) {
+                const decompressed = LZString.decompress(compressed);
+                window[key] = JSON.parse(decompressed) || [];
+            }
+        });
+
+         const compressedTempLeaves = localStorage.getItem('temporaryLeaves');
+        if (compressedTempLeaves) {
+            const decompressed = LZString.decompress(compressedTempLeaves);
+            temporaryLeaves = JSON.parse(decompressed) || [];
+        }
+        
+        // Load salary reminders
+        const compressedReminders = localStorage.getItem('salaryReminders');
+        if (compressedReminders) {
+            const decompressed = LZString.decompress(compressedReminders);
+            salaryReminders = JSON.parse(decompressed) || [];
+        }
+        
         // Load employees
         const compressedEmployees = localStorage.getItem('employees');
         if (compressedEmployees) {
@@ -85,14 +156,879 @@ function loadData() {
     }
 }
 
+function updateEmployeeLeaveStatus() {
+    const today = new Date().toISOString().split('T')[0];
+    
+    leaveRecords.forEach(leave => {
+        // Update leave status
+        if (leave.endDate < today) {
+            leave.status = 'completed';
+            
+            // Check if employee has returned (marked in attendance)
+            const hasReturned = attendanceRecords.some(att => 
+                att.empId === leave.empId && 
+                att.date > leave.endDate &&
+                att.status !== 'absent'
+            );
+            
+            if (!hasReturned) {
+                leave.status = 'overdue';
+                // Calculate overdue days
+                const endDate = new Date(leave.endDate);
+                const todayDate = new Date(today);
+                const diffTime = Math.abs(todayDate - endDate);
+                leave.overdueDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            }
+        } else if (leave.startDate <= today && leave.endDate >= today) {
+            leave.status = 'active';
+        } else {
+            leave.status = 'inactive';
+        }
+    });
+    
+    saveData();
+}
+
+// Handle temporary leave recording
+function handleTemporaryLeaveRecording(e) {
+    e.preventDefault();
+    
+    try {
+        const empId = getElement('tempLeaveEmpId').value;
+        const date = getElement('tempLeaveDate').value;
+        const startTime = getElement('tempLeaveStartTime').value;
+        const expectedReturn = getElement('tempLeaveExpectedReturn').value;
+        const reason = getElement('tempLeaveReason').value;
+        
+        if (!empId || !date || !startTime || !expectedReturn || !reason) {
+            throw new Error('All fields are required');
+        }
+        
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        const tempLeave = {
+            empId: empId,
+            date: date,
+            startTime: startTime,
+            expectedReturn: expectedReturn,
+            actualReturn: null,
+            reason: reason,
+            status: 'permitted',
+            recordedAt: new Date().toISOString()
+        };
+        
+        temporaryLeaves.push(tempLeave);
+        saveData();
+        
+        showAlert('Temporary leave recorded successfully!');
+        
+        const modal = bootstrap.Modal.getInstance(getElement('temporaryLeaveModal'));
+        if (modal) {
+            modal.hide();
+        }
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Check for overstayed temporary leaves
+function checkOverstayedLeaves() {
+    const now = new Date();
+    const currentTime = now.toTimeString().substring(0, 5);
+    const today = now.toISOString().split('T')[0];
+    
+    temporaryLeaves.forEach(leave => {
+        if (leave.date === today && leave.status === 'permitted' && leave.expectedReturn < currentTime) {
+            leave.status = 'overstayed';
+            leave.overstayedMinutes = calculateMinutesDifference(leave.expectedReturn, currentTime);
+            saveData();
+        }
+    });
+}
+
+function markTemporaryLeaveReturn(empId, date) {
+    const now = new Date();
+    const returnTime = now.toTimeString().substring(0, 5);
+    
+    const leaveIndex = temporaryLeaves.findIndex(l => 
+        l.empId === empId && l.date === date && l.status !== 'returned'
+    );
+    
+    if (leaveIndex !== -1) {
+        temporaryLeaves[leaveIndex].actualReturn = returnTime;
+        temporaryLeaves[leaveIndex].status = 'returned';
+        
+        if (temporaryLeaves[leaveIndex].expectedReturn < returnTime) {
+            temporaryLeaves[leaveIndex].status = 'overstayed';
+            temporaryLeaves[leaveIndex].overstayedMinutes = calculateMinutesDifference(
+                temporaryLeaves[leaveIndex].expectedReturn, 
+                returnTime
+            );
+        }
+        
+        saveData();
+        showAlert('Employee return recorded successfully!');
+    } else {
+        showAlert('No matching temporary leave record found', 'warning');
+    }
+}
+
+// Calculate salary reminders
+function calculateSalaryReminders() {
+    salaryReminders = [];
+    
+    // Group employees by payment frequency
+    const weeklyEmployees = employees.filter(emp => emp.paymentFrequency === 'weekly');
+    const biweeklyEmployees = employees.filter(emp => emp.paymentFrequency === 'biweekly');
+    const monthlyEmployees = employees.filter(emp => emp.paymentFrequency === 'monthly');
+    
+    // Calculate next payment dates
+    const today = new Date();
+    const currentDay = today.getDate();
+    
+    // Weekly payments (every Friday)
+    const nextFriday = new Date(today);
+    nextFriday.setDate(today.getDate() + (5 + 7 - today.getDay()) % 7);
+    if (weeklyEmployees.length > 0) {
+        salaryReminders.push({
+            frequency: 'weekly',
+            paymentDate: nextFriday.toISOString().split('T')[0],
+            employeeCount: weeklyEmployees.length,
+            totalAmount: weeklyEmployees.reduce((sum, emp) => sum + emp.salary, 0)
+        });
+    }
+    
+    // Biweekly payments (every other Friday)
+    const nextBiweeklyFriday = new Date(nextFriday);
+    if (today.getDay() >= 5) { // If today is Friday or later
+        nextBiweeklyFriday.setDate(nextFriday.getDate() + 7);
+    }
+    if (biweeklyEmployees.length > 0) {
+        salaryReminders.push({
+            frequency: 'biweekly',
+            paymentDate: nextBiweeklyFriday.toISOString().split('T')[0],
+            employeeCount: biweeklyEmployees.length,
+            totalAmount: biweeklyEmployees.reduce((sum, emp) => sum + emp.salary, 0)
+        });
+    }
+    
+    // Monthly payments
+    monthlyEmployees.forEach(emp => {
+        let paymentDate = new Date(today.getFullYear(), today.getMonth(), emp.paymentDay);
+        if (currentDay > emp.paymentDay) {
+            paymentDate = new Date(today.getFullYear(), today.getMonth() + 1, emp.paymentDay);
+        }
+        
+        salaryReminders.push({
+            frequency: 'monthly',
+            paymentDate: paymentDate.toISOString().split('T')[0],
+            employeeCount: 1,
+            totalAmount: emp.salary,
+            employeeId: emp.id
+        });
+    });
+    
+    saveData();
+    updateSalaryRemindersDisplay();
+}
+
+function updateSalaryRemindersDisplay() {
+    const remindersList = getElement('salaryRemindersList');
+    if (!remindersList) return;
+    
+    remindersList.innerHTML = '';
+    
+    
+    if (salaryReminders.length === 0) {
+        remindersList.innerHTML = '<p>No upcoming salary payments</p>';
+        return;
+    }
+    
+    const today = new Date();
+    
+    salaryReminders.sort((a, b) => new Date(a.paymentDate) - new Date(b.paymentDate));
+    
+    salaryReminders.forEach(reminder => {
+        const paymentDate = new Date(reminder.paymentDate);
+        const daysUntil = Math.ceil((paymentDate - today) / (1000 * 60 * 60 * 24));
+        const isUrgent = daysUntil <= 2;
+        
+        const reminderDiv = document.createElement('div');
+        reminderDiv.className = `salary-reminder ${isUrgent ? 'urgent' : ''}`;
+        
+        let employeeInfo = '';
+        if (reminder.employeeId) {
+            const emp = employees.find(e => e.id === reminder.employeeId);
+            if (emp) {
+                employeeInfo = `<p class="mb-1"><strong>Employee:</strong> ${emp.name} (${emp.id})</p>`;
+            }
+        } else {
+            employeeInfo = `<p class="mb-1"><strong>Employees:</strong> ${reminder.employeeCount}</p>`;
+        }
+        
+        reminderDiv.innerHTML = `
+            <h5>${reminder.frequency === 'weekly' ? 'Weekly' : 
+                  reminder.frequency === 'biweekly' ? 'Biweekly' : 'Monthly'} Payment</h5>
+            ${employeeInfo}
+            <p class="mb-1"><strong>Date:</strong> ${formatDate(reminder.paymentDate)}</p>
+            <p class="mb-1"><strong>Amount:</strong> Ksh ${reminder.totalAmount.toFixed(2)}</p>
+            <p class="mb-0"><strong>Days until payment:</strong> ${daysUntil} ${isUrgent ? '(Urgent!)' : ''}</p>
+        `;
+        
+        remindersList.appendChild(reminderDiv);
+    });
+    
+    updateSalarySavingsInfo();
+}
+
+// Update salary savings information
+function updateSalarySavingsInfo() {
+
+    const savingsInfo = getElement('salarySavingsInfo');
+    if (!savingsInfo) return;
+    
+    const monthlyPayments = salaryReminders.filter(r => r.frequency === 'monthly');
+    const totalMonthly = monthlyPayments.reduce((sum, r) => sum + r.totalAmount, 0);
+    
+    if (totalMonthly === 0) {
+        savingsInfo.innerHTML = '<p>No monthly salary payments scheduled</p>';
+        return;
+    }
+    
+    const today = new Date();
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const daysRemaining = daysInMonth - today.getDate();
+    
+    const dailySavingsNeeded = totalMonthly / daysInMonth;
+    const remainingDailySavings = totalMonthly / daysRemaining;
+    
+    savingsInfo.innerHTML = `
+        <div class="alert alert-info">
+            <h5>Monthly Salary Savings Plan</h5>
+            <p><strong>Total monthly salaries:</strong> Ksh ${totalMonthly.toFixed(2)}</p>
+            <p><strong>Recommended daily savings:</strong> Ksh ${dailySavingsNeeded.toFixed(2)}</p>
+            <p><strong>Current daily savings needed:</strong> Ksh ${remainingDailySavings.toFixed(2)}</p>
+        </div>
+    `;
+    
+    renderSalarySavingsChart(totalMonthly, dailySavingsNeeded, remainingDailySavings);
+}
+
+// View salary trends
+function viewSalaryTrends() {
+    try {
+        // Get data for the chart
+        const monthlyData = {};
+        salaryRecords.forEach(record => {
+            if (!monthlyData[record.month]) {
+                monthlyData[record.month] = 0;
+            }
+            monthlyData[record.month] += record.netSalary;
+        });
+        
+        const months = Object.keys(monthlyData).sort();
+        const amounts = months.map(month => monthlyData[month]);
+        
+        // Create chart
+        const ctx = document.getElementById('salaryTrendsChart').getContext('2d');
+        
+        // Destroy previous chart if it exists
+        if (window.salaryTrendsChart) {
+            window.salaryTrendsChart.destroy();
+        }
+        
+        window.salaryTrendsChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: months,
+                datasets: [{
+                    label: 'Total Salary Payments (Ksh)',
+                    data: amounts,
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Amount (Ksh)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Month'
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Show the trends modal
+        const trendsModal = new bootstrap.Modal(getElement('salaryTrendsModal'));
+        trendsModal.show();
+        
+    } catch (error) {
+        showAlert('Error displaying salary trends: ' + error.message, 'error');
+    }
+}
+
+// Late Employees Panel Functions
+function printLateEmployees() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const lateEmployees = attendanceRecords.filter(record => 
+            record.date === today && record.status === 'late'
+        );
+        
+        if (lateEmployees.length === 0) {
+            showAlert('No late employees to print', 'info');
+            return;
+        }
+
+        let printContent = '<h2>Late Employees - ' + formatDate(today) + '</h2><table class="table"><thead><tr><th>Employee ID</th><th>Name</th><th>Shift</th><th>Arrival Time</th><th>Minutes Late</th></tr></thead><tbody>';
+        
+        lateEmployees.forEach(record => {
+            const employee = employees.find(emp => emp.id === record.empId);
+            if (employee) {
+                printContent += `
+                    <tr>
+                        <td>${employee.id}</td>
+                        <td>${employee.name}</td>
+                        <td>${record.shiftType === 'day' ? 'Day Shift' : 'Night Shift'}</td>
+                        <td>${record.arrivalTime}</td>
+                        <td>${record.minutesLate}</td>
+                    </tr>
+                `;
+            }
+        });
+        
+        printContent += '</tbody></table>';
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <title>Late Employees Report</title>
+                    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+                    <style>
+                        @media print {
+                            body { padding: 20px; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    ${printContent}
+                    <script>
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                                window.close();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+    } catch (error) {
+        showAlert('Error printing late employees: ' + error.message, 'error');
+    }
+}
+
+function exportLateEmployeesCSV() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const lateEmployees = attendanceRecords.filter(record => 
+            record.date === today && record.status === 'late'
+        );
+        
+        if (lateEmployees.length === 0) {
+            showAlert('No late employees to export', 'info');
+            return;
+        }
+
+        let csvContent = 'Employee ID,Name,Shift,Arrival Time,Minutes Late\n';
+        
+        lateEmployees.forEach(record => {
+            const employee = employees.find(emp => emp.id === record.empId);
+            if (employee) {
+                csvContent += `"${employee.id}","${employee.name}","${record.shiftType === 'day' ? 'Day Shift' : 'Night Shift'}","${record.arrivalTime}",${record.minutesLate}\n`;
+            }
+        });
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `late_employees_${today}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showAlert('Late employees exported as CSV successfully!');
+    } catch (error) {
+        showAlert('Error exporting late employees: ' + error.message, 'error');
+    }
+}
+
+
+// Absent Employees Panel Functions
+function printAbsentEmployees() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const activeEmployees = employees.filter(emp => emp.status === 'active');
+        const presentEmployees = attendanceRecords
+            .filter(record => record.date === today)
+            .map(record => record.empId);
+        const onLeaveEmployees = leaveRecords
+            .filter(record => record.startDate <= today && record.endDate >= today)
+            .map(record => record.empId);
+        const absentEmployees = activeEmployees.filter(emp => 
+            !presentEmployees.includes(emp.id) && !onLeaveEmployees.includes(emp.id)
+        );
+        
+        if (absentEmployees.length === 0) {
+            showAlert('No absent employees to print', 'info');
+            return;
+        }
+
+        let printContent = '<h2>Absent Employees - ' + formatDate(today) + '</h2><table class="table"><thead><tr><th>Employee ID</th><th>Name</th><th>Shift</th><th>Department</th></tr></thead><tbody>';
+        
+        absentEmployees.forEach(employee => {
+            printContent += `
+                <tr>
+                    <td>${employee.id}</td>
+                    <td>${employee.name}</td>
+                    <td>${employee.shift === 'day' ? 'Day Shift' : 'Night Shift'}</td>
+                    <td>${employee.department || 'N/A'}</td>
+                </tr>
+            `;
+        });
+        
+        printContent += '</tbody></table>';
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <title>Absent Employees Report</title>
+                    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+                    <style>
+                        @media print {
+                            body { padding: 20px; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    ${printContent}
+                    <script>
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                                window.close();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+    } catch (error) {
+        showAlert('Error printing absent employees: ' + error.message, 'error');
+    }
+}
+
+
+function exportAbsentEmployeesCSV() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const activeEmployees = employees.filter(emp => emp.status === 'active');
+        const presentEmployees = attendanceRecords
+            .filter(record => record.date === today)
+            .map(record => record.empId);
+        const onLeaveEmployees = leaveRecords
+            .filter(record => record.startDate <= today && record.endDate >= today)
+            .map(record => record.empId);
+        const absentEmployees = activeEmployees.filter(emp => 
+            !presentEmployees.includes(emp.id) && !onLeaveEmployees.includes(emp.id)
+        );
+        
+        if (absentEmployees.length === 0) {
+            showAlert('No absent employees to export', 'info');
+            return;
+        }
+
+        let csvContent = 'Employee ID,Name,Shift,Department\n';
+        
+        absentEmployees.forEach(employee => {
+            csvContent += `"${employee.id}","${employee.name}","${employee.shift === 'day' ? 'Day Shift' : 'Night Shift'}","${employee.department || 'N/A'}"\n`;
+        });
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `absent_employees_${today}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showAlert('Absent employees exported as CSV successfully!');
+    } catch (error) {
+        showAlert('Error exporting absent employees: ' + error.message, 'error');
+    }
+}
+
+// Print salary reminders
+function printSalaryReminders() {
+    try {
+        const printContent = document.getElementById('salaryRemindersList').cloneNode(true);
+        const printWindow = window.open('', '_blank');
+        
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <title>Salary Reminders</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 20px; }
+                        .salary-reminder { 
+                            border: 1px solid #ddd; 
+                            padding: 15px; 
+                            margin-bottom: 15px; 
+                            border-radius: 5px;
+                        }
+                        .urgent { 
+                            border-left: 5px solid #dc3545;
+                            background-color: #fff8f8;
+                        }
+                        h5 { margin-top: 0; }
+                        @media print {
+                            body { padding: 0; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h2>Salary Reminders - ${formatDate(new Date().toISOString())}</h2>
+                    ${printContent.innerHTML}
+                    <script>
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                                window.close();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+        
+    } catch (error) {
+        showAlert('Error printing salary reminders: ' + error.message, 'error');
+    }
+}
+
+function exportSalaryRemindersCSV() {
+    try {
+        const today = new Date();
+        const csvContent = [
+            ['Payment Date', 'Frequency', 'Employee Count', 'Total Amount', 'Days Until Payment', 'Status'],
+            ...salaryReminders.map(reminder => {
+                const paymentDate = new Date(reminder.paymentDate);
+                const daysUntil = Math.ceil((paymentDate - today) / (1000 * 60 * 60 * 24));
+                const status = daysUntil <= 2 ? 'Urgent' : daysUntil <= 7 ? 'Upcoming' : 'Future';
+                
+                return [
+                    formatDate(reminder.paymentDate),
+                    reminder.frequency,
+                    reminder.employeeCount || 1,
+                    `Ksh ${reminder.totalAmount.toFixed(2)}`,
+                    daysUntil,
+                    status
+                ];
+            })
+        ].map(row => row.join(',')).join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `salary_reminders_${today.toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showAlert('Salary reminders exported as CSV successfully!');
+    } catch (error) {
+        showAlert('Error exporting salary reminders: ' + error.message, 'error');
+    }
+}
+
+// Notify late employees from reminders panel
+function notifyLateEmployeesFromReminders() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const lateEmployees = attendanceRecords.filter(record => 
+            record.date === today && record.status === 'late'
+        );
+        
+        if (lateEmployees.length === 0) {
+            showAlert('No late employees today', 'info');
+            return;
+        }
+        
+        notifyLateEmployees(lateEmployees);
+    } catch (error) {
+        showAlert('Error notifying late employees: ' + error.message, 'error');
+    }
+}
+
+// Notify absent employees from reminders panel
+function notifyAbsentEmployeesFromReminders() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const activeEmployees = employees.filter(emp => emp.status === 'active');
+        const presentEmployees = attendanceRecords
+            .filter(record => record.date === today)
+            .map(record => record.empId);
+        const onLeaveEmployees = leaveRecords
+            .filter(record => record.startDate <= today && record.endDate >= today)
+            .map(record => record.empId);
+        const absentEmployees = activeEmployees.filter(emp => 
+            !presentEmployees.includes(emp.id) && !onLeaveEmployees.includes(emp.id)
+        );
+        
+        if (absentEmployees.length === 0) {
+            showAlert('No absent employees today', 'info');
+            return;
+        }
+        
+        // Create notification
+        if (Notification.permission === 'granted') {
+            const notification = new Notification('Absent Employees Today', {
+                body: `The following employees are absent today: ${absentEmployees.map(emp => emp.name).join(', ')}`,
+                icon: 'https://cdn-icons-png.flaticon.com/512/3143/3143463.png'
+            });
+            
+            playNotificationSound();
+            
+            // If email notifications are enabled, send email
+            if (settings.enableEmailNotifications && settings.notificationEmail) {
+                console.log(`Would send email to ${settings.notificationEmail} about absent employees`);
+            }
+        } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    notifyAbsentEmployeesFromReminders();
+                }
+            });
+        }
+        
+        showAlert(`Notified about ${absentEmployees.length} absent employees`);
+    } catch (error) {
+        showAlert('Error notifying absent employees: ' + error.message, 'error');
+    }
+}
+
+// Update comments display with optional filtering
+function updateCommentsDisplay(filteredComments = null) {
+    const commentsToDisplay = filteredComments || comments;
+    const commentsList = getElement('commentsList');
+    if (!commentsList) return;
+    
+    commentsList.innerHTML = '';
+    
+    if (commentsToDisplay.length === 0) {
+        commentsList.innerHTML = '<p>No comments found</p>';
+        return;
+    }
+    
+    commentsToDisplay.forEach(comment => {
+        const emp = employees.find(e => e.id === comment.empId);
+        if (!emp) return;
+        
+        const commentDiv = document.createElement('div');
+        commentDiv.className = `comment ${comment.type}`;
+        commentDiv.innerHTML = `
+            <div class="comment-header">
+                <strong>${emp.name} (${emp.id})</strong>
+                <span class="badge ${comment.type === 'positive' ? 'bg-success' : 'bg-warning'}">
+                    ${comment.type === 'positive' ? 'Positive' : 'Negative'}
+                </span>
+                <span class="text-muted small">${formatDate(comment.date)}</span>
+            </div>
+            <div class="comment-rating">
+                Rating: ${'★'.repeat(comment.rating)}${'☆'.repeat(5 - comment.rating)}
+            </div>
+            <div class="comment-text">${comment.comment}</div>
+        `;
+        
+        commentsList.appendChild(commentDiv);
+    });
+}
+
+
+// Render salary savings chart
+function renderSalarySavingsChart(totalMonthly, dailyNeeded, remainingDaily) {
+    const ctx = document.getElementById('salarySavingsChart').getContext('2d');
+    
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Total Monthly', 'Daily Needed', 'Remaining Daily'],
+            datasets: [{
+                label: 'Salary Savings (Ksh)',
+                data: [totalMonthly, dailyNeeded, remainingDaily],
+                backgroundColor: [
+                    'rgba(54, 162, 235, 0.5)',
+                    'rgba(75, 192, 192, 0.5)',
+                    'rgba(255, 99, 132, 0.5)'
+                ],
+                borderColor: [
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(255, 99, 132, 1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Amount (Ksh)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Handle photo upload preview
+function setupPhotoPreview() {
+    const photoInput = getElement('photo');
+    if (!photoInput) return;
+    
+    photoInput.addEventListener('change', function() {
+        const file = this.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const preview = getElement('photoPreview');
+            preview.src = e.target.result;
+            preview.classList.remove('d-none');
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// Update attendance recording to include shift comments
+
+
+
+// Render performance analytics charts
+function renderEmployeeAnalytics(empId) {
+    // Attendance trend chart
+    const attendanceCtx = document.getElementById('attendanceTrendChart').getContext('2d');
+    const performanceCtx = document.getElementById('performanceTrendChart').getContext('2d');
+    
+    // Get employee's attendance records
+    const empAttendance = attendanceRecords.filter(att => att.empId === empId);
+    
+    // Prepare data for charts
+    const labels = empAttendance.map(att => formatDateShort(att.date));
+    const lateMinutes = empAttendance.map(att => att.minutesLate || 0);
+    const comments = empAttendance.filter(att => att.shiftComments).map(att => att.shiftComments);
+    
+    // Attendance trend chart
+    new Chart(attendanceCtx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Minutes Late',
+                data: lateMinutes,
+                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Minutes Late'
+                    }
+                }
+            }
+        }
+    });
+    
+    // Performance trend chart (simple example - would be enhanced with actual metrics)
+    new Chart(performanceCtx, {
+        type: 'bar',
+        data: {
+            labels: labels.slice(-10), // Last 10 records
+            datasets: [{
+                label: 'Performance Rating',
+                data: Array(10).fill(0).map((_, i) => 5 - Math.min(4, lateMinutes[i] / 30)), // Simple rating based on lateness
+                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 5,
+                    title: {
+                        display: true,
+                        text: 'Rating (1-5)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+
 // Save data to localStorage with compression
 function saveData() {
     try {
         // Compress data before saving
         localStorage.setItem('employees', LZString.compress(JSON.stringify(employees)));
         localStorage.setItem('attendance', LZString.compress(JSON.stringify(attendanceRecords)));
+        localStorage.setItem('temporaryLeaves', LZString.compress(JSON.stringify(temporaryLeaves)));
+        localStorage.setItem('salaryReminders', LZString.compress(JSON.stringify(salaryReminders)));
         localStorage.setItem('leaveRecords', LZString.compress(JSON.stringify(leaveRecords)));
         localStorage.setItem('deductions', LZString.compress(JSON.stringify(deductions)));
+        localStorage.setItem('deductions', LZString.compress(JSON.stringify(comments)));
         localStorage.setItem('salaryRecords', LZString.compress(JSON.stringify(salaryRecords)));
         localStorage.setItem('settings', JSON.stringify(settings));
         
@@ -254,6 +1190,25 @@ function formatDateShort(dateString) {
 
 // Set up event listeners
 function setupEventListeners() {
+
+    // Salary Reminders Panel
+    document.getElementById('updateProjectionBtn')?.addEventListener('click', updateSalaryReminders);
+    document.getElementById('viewTrendsBtn')?.addEventListener('click', viewSalaryTrends);
+    document.getElementById('printRemindersBtn')?.addEventListener('click', printSalaryReminders);
+    document.getElementById('exportRemindersBtn')?.addEventListener('click', exportSalaryRemindersCSV);
+
+    // Late Employees Panel
+    document.getElementById('printLateEmployeesBtn')?.addEventListener('click', printLateEmployees);
+    document.getElementById('exportLateEmployeesBtn')?.addEventListener('click', exportLateEmployeesCSV);
+    document.getElementById('notifyLateBtn')?.addEventListener('click', notifyLateEmployeesFromReminders);
+
+    // Absent Employees Panel
+    document.getElementById('printAbsentEmployeesBtn')?.addEventListener('click', printAbsentEmployees);
+    document.getElementById('exportAbsentEmployeesBtn')?.addEventListener('click', exportAbsentEmployeesCSV);
+    document.getElementById('notifyAbsentBtn')?.addEventListener('click', notifyAbsentEmployeesFromReminders);
+
+
+
     // Register new employee
     const employeeForm = getElement('employeeForm');
     if (employeeForm) {
@@ -270,6 +1225,21 @@ function setupEventListeners() {
         const approvedOvertime = getElement('approvedOvertime');
         const shiftTypeAttendance = getElement('shiftTypeAttendance');
         const attendanceDate = getElement('attendanceDate');
+
+         // Photo preview
+    setupPhotoPreview();
+    
+    // Check for overstayed leaves every minute
+    setInterval(checkOverstayedLeaves, 60000);
+    
+    // Calculate salary reminders daily
+    calculateSalaryReminders();
+    setInterval(calculateSalaryReminders, 86400000); // Once per day
+
+         // Temporary leave form
+    const tempLeaveForm = getElement('temporaryLeaveForm');
+    if (tempLeaveForm) {
+        tempLeaveForm.addEventListener('submit', handleTemporaryLeaveRecording);
         
         if (departureTime && approvedOvertime && shiftTypeAttendance && attendanceDate) {
             departureTime.addEventListener('change', calculateOverstayMinutes);
@@ -452,9 +1422,18 @@ function setupEventListeners() {
     }
 }
 
+
+
 // Quick search functionality
 function handleQuickSearch() {
     const searchTerm = getElement('quickSearchInput').value.toLowerCase();
+
+     if (!searchTerm) {
+        // Reset views if search is empty
+        updateSalaryRemindersDisplay();
+        return;
+    }
+    
     if (!searchTerm) return;
 
     const results = employees.filter(emp => 
@@ -533,6 +1512,7 @@ function handleEmployeeRegistration(e) {
         const agreedSalary = parseFloat(getElement('agreedSalary').value);
         const paymentDay = parseInt(getElement('paymentDay').value);
         const department = getElement('department').value;
+        const paymentFrequency = getElement('paymentFrequency').value;
         const email = getElement('email').value;
         
         // Validate input
@@ -564,6 +1544,7 @@ function handleEmployeeRegistration(e) {
             shift: shiftType,
             workingDays: workingDays,
             salary: agreedSalary,
+            paymentFrequency: paymentFrequency,
             paymentDay: paymentDay,
             department: department,
             email: email,
@@ -572,6 +1553,7 @@ function handleEmployeeRegistration(e) {
             createdAt: new Date().toISOString()
         };
         
+        newEmployee.paymentFrequency = paymentFrequency;
         employees.push(newEmployee);
         saveData();
         
@@ -594,6 +1576,18 @@ function handleAttendanceRecording(e) {
         const approvedOvertime = parseInt(getElement('approvedOvertime').value) || 0;
         const shiftType = getElement('shiftTypeAttendance').value;
         const overstayMinutes = parseInt(getElement('overstayMinutes').value) || 0;
+
+                // Check if employee is on leave
+        const today = new Date().toISOString().split('T')[0];
+        const onLeave = leaveRecords.some(leave => 
+            leave.empId === empId && 
+            leave.startDate <= today && 
+            leave.endDate >= today
+        );
+        
+        if (onLeave) {
+            throw new Error('This employee is currently on leave and cannot be marked present');
+        }
         
         if (!empId || !date || !arrivalTime || !shiftType) {
             throw new Error('All required fields must be filled');
@@ -2422,6 +3416,286 @@ function deleteLeaveRecord(index) {
     }
 }
 
+document.getElementById('fetchRecordsBtn')?.addEventListener('click', fetchEmployeeRecords);
+document.getElementById('exportEmployeeRecords')?.addEventListener('click', exportEmployeeRecords);
+document.getElementById('printEmployeeRecord')?.addEventListener('click', printEmployeeRecord);
+
+// Fetch Employee Records
+function fetchEmployeeRecords() {
+    try {
+        const empId = getElement('recordEmpId').value;
+        if (!empId) {
+            throw new Error('Please enter an Employee ID');
+        }
+        
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        // Get all related records
+        const empAttendance = attendanceRecords.filter(att => att.empId === empId);
+        const empLeaves = leaveRecords.filter(leave => leave.empId === empId);
+        const empDeductions = deductions.filter(ded => ded.empId === empId);
+        const empSalaries = salaryRecords.filter(sal => sal.empId === empId);
+        
+        // Display the records
+        const recordsBody = getElement('employeeRecordsBody');
+        if (recordsBody) {
+            recordsBody.innerHTML = `
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">Employee Details</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>ID:</strong> ${employee.id}</p>
+                                <p><strong>Name:</strong> ${employee.name}</p>
+                                <p><strong>Phone:</strong> ${employee.phone}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Department:</strong> ${employee.department || 'N/A'}</p>
+                                <p><strong>Shift:</strong> ${employee.shift === 'day' ? 'Day Shift' : 'Night Shift'}</p>
+                                <p><strong>Status:</strong> ${employee.status === 'active' ? 'Active' : 'Inactive'}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">Attendance Records (Last 10)</h5>
+                    </div>
+                    <div class="card-body">
+                        ${empAttendance.length > 0 ? `
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Status</th>
+                                            <th>Arrival Time</th>
+                                            <th>Late Minutes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${empAttendance.slice(-10).reverse().map(att => `
+                                            <tr>
+                                                <td>${formatDate(att.date)}</td>
+                                                <td>
+                                                    ${att.status === 'on_time' ? 
+                                                        '<span class="badge bg-success">On Time</span>' : 
+                                                     att.status === 'late' ? 
+                                                        '<span class="badge bg-warning">Late</span>' : 
+                                                        '<span class="badge bg-danger">Absent</span>'}
+                                                </td>
+                                                <td>${att.arrivalTime || 'N/A'}</td>
+                                                <td>${att.minutesLate || '0'}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : '<p>No attendance records found</p>'}
+                    </div>
+                </div>
+                
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">Salary Records</h5>
+                    </div>
+                    <div class="card-body">
+                        ${empSalaries.length > 0 ? `
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Month</th>
+                                            <th>Gross Salary</th>
+                                            <th>Deductions</th>
+                                            <th>Net Salary</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${empSalaries.slice().reverse().map(sal => `
+                                            <tr>
+                                                <td>${sal.month}</td>
+                                                <td>Ksh ${sal.grossSalary.toFixed(2)}</td>
+                                                <td>Ksh ${sal.deductions.toFixed(2)}</td>
+                                                <td>Ksh ${sal.netSalary.toFixed(2)}</td>
+                                                <td>
+                                                    <span class="badge ${sal.status === 'paid' ? 'bg-success' : 'bg-warning'}">
+                                                        ${sal.status === 'paid' ? 'Paid' : 'Pending'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : '<p>No salary records found</p>'}
+                    </div>
+                </div>
+            `;
+        }
+        
+        showAlert('Employee records fetched successfully');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Export Employee Records as PDF
+function exportEmployeeRecords() {
+    try {
+        const empId = getElement('recordEmpId').value;
+        if (!empId) {
+            throw new Error('Please enter an Employee ID first');
+        }
+        
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        // Get all related records
+        const empAttendance = attendanceRecords.filter(att => att.empId === empId);
+        const empLeaves = leaveRecords.filter(leave => leave.empId === empId);
+        const empDeductions = deductions.filter(ded => ded.empId === empId);
+        const empSalaries = salaryRecords.filter(sal => sal.empId === empId);
+        
+        // Create a comprehensive PDF
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // Add company header
+        doc.setFontSize(18);
+        doc.text('Bamburi Tilapia Hotel', 105, 15, { align: 'center' });
+        doc.setFontSize(14);
+        doc.text('Employee Records', 105, 25, { align: 'center' });
+        
+        // Add employee details
+        doc.setFontSize(12);
+        doc.text(`Employee: ${employee.name} (${employee.id})`, 15, 40);
+        doc.text(`Department: ${employee.department || 'N/A'}`, 15, 50);
+        doc.text(`Shift: ${employee.shift === 'day' ? 'Day Shift' : 'Night Shift'}`, 15, 60);
+        doc.text(`Salary: Ksh ${employee.salary.toFixed(2)}`, 15, 70);
+        doc.text(`Status: ${employee.status === 'active' ? 'Active' : 'Inactive'}`, 15, 80);
+        
+        // Add attendance records
+        if (empAttendance.length > 0) {
+            doc.addPage();
+            doc.setFontSize(14);
+            doc.text('Attendance Records', 15, 20);
+            doc.setFontSize(10);
+            
+            let yPos = 30;
+            empAttendance.slice().reverse().forEach((att, i) => {
+                if (yPos > 280) {
+                    doc.addPage();
+                    yPos = 20;
+                }
+                
+                doc.text(
+                    `${formatDate(att.date)}: ${att.status === 'on_time' ? 'On Time' : 
+                     att.status === 'late' ? `Late (${att.minutesLate} mins)` : 'Absent'}`,
+                    15, yPos
+                );
+                yPos += 10;
+            });
+        }
+        
+        // Add salary records
+        if (empSalaries.length > 0) {
+            doc.addPage();
+            doc.setFontSize(14);
+            doc.text('Salary Records', 15, 20);
+            doc.setFontSize(10);
+            
+            yPos = 30;
+            empSalaries.slice().reverse().forEach((sal, i) => {
+                if (yPos > 280) {
+                    doc.addPage();
+                    yPos = 20;
+                }
+                
+                doc.text(
+                    `${sal.month}: Gross Ksh ${sal.grossSalary.toFixed(2)}, ` +
+                    `Deductions Ksh ${sal.deductions.toFixed(2)}, ` +
+                    `Net Ksh ${sal.netSalary.toFixed(2)} (${sal.status})`,
+                    15, yPos
+                );
+                yPos += 10;
+            });
+        }
+        
+        // Save the PDF
+        doc.save(`Employee_Records_${employee.id}.pdf`);
+        
+        showAlert('Employee records exported successfully!');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Print Employee Record
+function printEmployeeRecord() {
+    try {
+        const empId = getElement('recordEmpId').value;
+        if (!empId) {
+            throw new Error('Please enter an Employee ID first');
+        }
+        
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        // Get the records body content
+        const recordsBody = getElement('employeeRecordsBody');
+        if (!recordsBody) return;
+        
+        // Create a print window
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <title>Employee Record - ${employee.name}</title>
+                    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+                    <style>
+                        @media print {
+                            body { padding: 20px; }
+                            .no-print { display: none !important; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h2 class="text-center">Employee Record - ${employee.name}</h2>
+                    <p class="text-end">Printed on: ${formatDate(new Date().toISOString())}</p>
+                    ${recordsBody.innerHTML}
+                    <div class="no-print text-center mt-4">
+                        <button onclick="window.print()" class="btn btn-primary">Print</button>
+                        <button onclick="window.close()" class="btn btn-secondary ms-2">Close</button>
+                    </div>
+                    <script>
+                        // Auto-print when window loads
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
 // Enhanced show employee details
 function showEmployeeDetails(empId) {
     try {
@@ -2719,6 +3993,33 @@ function showEmployeeDetails(empId) {
                 </div>
             </div>
         `;
+
+                // analytics section
+        html += `
+            <div class="row mt-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">Performance Analytics</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="chart-container">
+                                        <canvas id="attendanceTrendChart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="chart-container">
+                                        <canvas id="performanceTrendChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
         
         modalBody.innerHTML = html;
         
@@ -2754,10 +4055,30 @@ function showEmployeeDetails(empId) {
         
         const modal = new bootstrap.Modal(getElement('employeeModal'));
         modal.show();
+
+         setTimeout(() => {
+            renderEmployeeAnalytics(empId);
+        }, 500);
+
     } catch (error) {
         showAlert(error.message, 'error');
     }
 }
+
+
+
+
+// Helper function to calculate time difference in minutes
+function calculateMinutesDifference(startTime, endTime) {
+    const [startHours, startMins] = startTime.split(':').map(Number);
+    const [endHours, endMins] = endTime.split(':').map(Number);
+    
+    const startTotal = startHours * 60 + startMins;
+    const endTotal = endHours * 60 + endMins;
+    
+    return Math.max(0, endTotal - startTotal);
+}
+
 
 // View salary record
 function viewSalaryRecord(index) {
@@ -3611,6 +4932,12 @@ function markAllEmployeesPresent() {
     try {
         const today = new Date().toISOString().split('T')[0];
         const activeEmployees = employees.filter(emp => emp.status === 'active');
+
+                // Ask for shift type
+        const shiftType = prompt('Are these employees on day or night shift? (Enter "day" or "night")');
+        if (!shiftType || (shiftType !== 'day' && shiftType !== 'night')) {
+            throw new Error('Please specify shift type (day or night)');
+        }
         
         if (activeEmployees.length === 0) {
             showAlert('No active employees found', 'warning');
@@ -3642,6 +4969,8 @@ function markAllEmployeesPresent() {
             }
         });
         
+        // Add shift type to attendance record
+        attendanceRecord.shiftType = shiftType;
         saveData();
         showAlert(`Marked all ${activeEmployees.length} employees as present for today`);
         updateLateEmployeesList();
@@ -3651,6 +4980,121 @@ function markAllEmployeesPresent() {
     }
 }
 
+// Update notification system to use real APIs
+async function notifyLateEmployees(lateEmployees) {
+    try {
+        // Prepare message for admin
+        const adminMessage = `Late Employees Report:\n\n${
+            lateEmployees.map(record => {
+                const emp = employees.find(e => e.id === record.empId);
+                return `${emp ? emp.name : 'Unknown'} (${record.empId}): ${record.minutesLate} minutes late`;
+            }).join('\n')
+        }`;
+        
+        // Send to admin (simulated API call)
+        await sendNotification(settings.notificationEmail, 'Late Employees Report', adminMessage);
+        
+        // Send individual messages
+        for (const record of lateEmployees) {
+            const emp = employees.find(e => e.id === record.empId);
+            if (emp && (emp.phone || emp.email)) {
+                const message = `Dear ${emp.name}, you were ${record.minutesLate} minutes late on ${formatDate(record.date)}. Please ensure punctuality.`;
+                
+                if (emp.phone) {
+                    await sendSMS(emp.phone, message);
+                }
+                
+                if (emp.email) {
+                    await sendEmail(emp.email, 'Late Arrival Notification', message);
+                }
+            }
+        }
+        
+        showAlert('Late employees have been notified');
+    } catch (error) {
+        showAlert(`Failed to send notifications: ${error.message}`, 'error');
+    }
+}
+
+// Simulated API functions
+async function sendSMS(phone, message) {
+    // In a real implementation, this would call your SMS gateway API
+    console.log(`Would send SMS to ${phone}: ${message}`);
+    return new Promise(resolve => setTimeout(resolve, 500));
+}
+
+async function sendEmail(email, subject, message) {
+    // In a real implementation, this would call your email service API
+    console.log(`Would send email to ${email} with subject "${subject}": ${message}`);
+    return new Promise(resolve => setTimeout(resolve, 500));
+}
+
+async function sendNotification(email, subject, message) {
+    // In a real implementation, this would call your notification service
+    console.log(`Would send notification to ${email} with subject "${subject}": ${message}`);
+    return new Promise(resolve => setTimeout(resolve, 500));
+}
+
+// Update export functions to include all employee details
+function exportEmployeeRecords(empId) {
+    try {
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        // Get all related records
+        const empAttendance = attendanceRecords.filter(att => att.empId === empId);
+        const empLeaves = leaveRecords.filter(leave => leave.empId === empId);
+        const empDeductions = deductions.filter(ded => ded.empId === empId);
+        const empSalaries = salaryRecords.filter(sal => sal.empId === empId);
+        
+        // Create a comprehensive PDF
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // Add company header
+        doc.setFontSize(18);
+        doc.text('BAMBURI TILAPIA HOTEL', 105, 15, { align: 'center' });
+        doc.setFontSize(14);
+        doc.text('Employee Records', 105, 25, { align: 'center' });
+        
+        // Add employee details
+        doc.setFontSize(12);
+        doc.text(`Employee: ${employee.name} (${employee.id})`, 15, 40);
+        doc.text(`Department: ${employee.department || 'N/A'}`, 15, 50);
+        doc.text(`Shift: ${employee.shift === 'day' ? 'Day Shift' : 'Night Shift'}`, 15, 60);
+        doc.text(`Salary: Ksh ${employee.salary.toFixed(2)}`, 15, 70);
+        
+        // Add attendance records
+        doc.addPage();
+        doc.setFontSize(14);
+        doc.text('Attendance Records', 15, 20);
+        doc.setFontSize(10);
+        
+        let yPos = 30;
+        empAttendance.forEach((att, i) => {
+            if (yPos > 280) {
+                doc.addPage();
+                yPos = 20;
+            }
+            
+            doc.text(
+                `${formatDate(att.date)}: ${att.status === 'on_time' ? 'On Time' : 
+                 att.status === 'late' ? `Late (${att.minutesLate} mins)` : 'Absent'}`,
+                15, yPos
+            );
+            yPos += 10;
+        });
+
+        // Save the PDF
+        doc.save(`Employee_Records_${employee.id}.pdf`);
+        
+        showAlert('Employee records exported successfully!');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
 // Export all employees
 function exportAllEmployees() {
     try {
@@ -3834,6 +5278,704 @@ function importData() {
     }
 }
 
+// Salary Reminders Functions
+function updateSalaryReminders() {
+    try {
+        // Calculate upcoming payment dates
+        const today = new Date();
+        const currentMonth = today.getMonth();
+        const currentYear = today.getFullYear();
+         // Calculate daily savings amount
+        const dailySavingsAmount = parseFloat(getElement('dailySavingsAmount').value) || 0;
+        // Group employees by payment frequency
+        const weeklyEmployees = employees.filter(emp => emp.paymentFrequency === 'weekly');
+        const biweeklyEmployees = employees.filter(emp => emp.paymentFrequency === 'biweekly');
+        const monthlyEmployees = employees.filter(emp => emp.paymentFrequency === 'monthly');
+        
+        // Calculate upcoming payment dates for each group
+        const upcomingPayments = [];
+        
+        // Weekly payments (every Friday)
+        const nextFriday = getNextDayOfWeek(today, 5); // 5 = Friday
+        if (weeklyEmployees.length > 0) {
+            upcomingPayments.push({
+                date: nextFriday,
+                frequency: 'Weekly',
+                employees: weeklyEmployees,
+                amount: weeklyAmount,
+                daysUntil: daysUntil,
+                dailyNeeded: weeklyAmount / daysUntil,
+                projectedSavings: dailySavingsAmount * daysUntil
+            });
+        }
+        
+        // Biweekly payments (every other Friday)
+        const fridayAfterNext = new Date(nextFriday);
+        fridayAfterNext.setDate(fridayAfterNext.getDate() + 7);
+        if (biweeklyEmployees.length > 0) {
+            upcomingPayments.push({
+                date: biweeklyFriday,
+                frequency: 'Biweekly',
+                employees: biweeklyEmployees,
+                amount: biweeklyAmount,
+                daysUntil: daysUntil,
+                dailyNeeded: biweeklyAmount / daysUntil,
+                projectedSavings: dailySavingsAmount * daysUntil
+            });
+        }
+        
+        // Monthly payments
+        monthlyEmployees.forEach(emp => {
+            const paymentDate = new Date(currentYear, currentMonth, emp.paymentDay);
+            if (paymentDate < today) {
+                paymentDate.setMonth(paymentDate.getMonth() + 1);
+            }
+            
+            upcomingPayments.push({
+                date: paymentDate,
+                frequency: 'Monthly',
+                employees: [emp],
+                amount: emp.salary,
+                daysUntil: daysUntil,
+                dailyNeeded: emp.salary / daysUntil,
+                projectedSavings: dailySavingsAmount * daysUntil
+            });
+        });
+        
+        // Sort by date
+        upcomingPayments.sort((a, b) => a.date - b.date);
+        
+        // Update UI
+                updateUpcomingPaymentsTable(upcomingPayments);
+        updateSavingsAnalytics(upcomingPayments, dailySavingsAmount);
+        
+        showAlert('Salary reminders updated successfully');
+    } catch (error) {
+        console.error('Error updating salary reminders:', error);
+        showAlert('Error updating salary reminders: ' + error.message, 'error');
+    }
+
+
+        const paymentsList = document.getElementById('upcomingPaymentsList');
+        if (paymentsList) {
+            paymentsList.innerHTML = '';
+            
+            if (upcomingPayments.length === 0) {
+                paymentsList.innerHTML = '<tr><td colspan="5" class="text-center">No upcoming payments</td></tr>';
+                return;
+            }
+            
+            upcomingPayments.forEach(payment => {
+                const daysLeft = Math.ceil((payment.date - today) / (1000 * 60 * 60 * 24));
+                let statusClass = 'upcoming';
+                if (daysLeft <= 2) statusClass = 'urgent';
+                else if (daysLeft <= 7) statusClass = 'due-soon';
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${formatDate(payment.date.toISOString())}</td>
+                    <td>${payment.frequency}</td>
+                    <td>${payment.employees.length}</td>
+                    <td>Ksh ${payment.amount.toFixed(2)}</td>
+                    <td><span class="payment-status ${statusClass}">${daysLeft} days</span></td>
+                `;
+                paymentsList.appendChild(row);
+            });
+        }
+        
+        
+        // Update analytics
+        updateSavingsAnalytics();
+        updateSavingsAnalytics(upcomingPayments, dailySavingsAmount);
+}
+
+
+function updateUpcomingPaymentsTable(payments) {
+    const paymentsList = document.getElementById('upcomingPaymentsList');
+    if (!paymentsList) return;
+    
+    paymentsList.innerHTML = '';
+    
+    if (payments.length === 0) {
+        paymentsList.innerHTML = '<tr><td colspan="6" class="text-center">No upcoming payments</td></tr>';
+        return;
+    }
+    
+    payments.forEach(payment => {
+        const row = document.createElement('tr');
+        
+        // Determine status class
+        let statusClass = '';
+        if (payment.daysUntil <= 2) {
+            statusClass = 'urgent';
+        } else if (payment.daysUntil <= 7) {
+            statusClass = 'due-soon';
+        }
+        
+        row.innerHTML = `
+            <td>${formatDate(payment.date.toISOString())}</td>
+            <td>${payment.frequency}</td>
+            <td>${payment.employees.length}</td>
+            <td>Ksh ${payment.amount.toFixed(2)}</td>
+            <td>${payment.daysUntil}</td>
+            <td class="${statusClass}">
+                ${payment.projectedSavings >= payment.amount ? 
+                    '<i class="bi bi-check-circle-fill text-success"></i> On track' : 
+                    '<i class="bi bi-exclamation-triangle-fill text-warning"></i> Needs attention'}
+            </td>
+        `;
+        paymentsList.appendChild(row);
+    });
+}
+
+
+
+function getNextDayOfWeek(date, dayOfWeek) {
+    const result = new Date(date);
+    result.setDate(date.getDate() + ((dayOfWeek + 7 - date.getDay()) % 7));
+    return result;
+}
+
+
+function updateSavingsAnalytics() {
+    try {
+        const monthlyEmployees = employees.filter(emp => emp.paymentFrequency === 'monthly');
+        const totalMonthly = monthlyEmployees.reduce((sum, emp) => sum + emp.salary, 0);
+        
+        // Get payment dates for this month
+        const today = new Date();
+        const paymentDates = [];
+        
+        monthlyEmployees.forEach(emp => {
+            const paymentDate = new Date(today.getFullYear(), today.getMonth(), emp.paymentDay);
+            if (paymentDate < today) {
+                paymentDate.setMonth(paymentDate.getMonth() + 1);
+            }
+            paymentDates.push(paymentDate);
+        });
+        
+        // Find the earliest payment date
+        if (paymentDates.length === 0) return;
+        
+        const earliestPayment = new Date(Math.min(...paymentDates.map(d => d.getTime())));
+        const daysUntilPayment = Math.ceil((earliestPayment - today) / (1000 * 60 * 60 * 24));
+        
+        // Calculate required daily savings
+        const dailySavingsNeeded = totalMonthly / daysUntilPayment;
+        
+        // Update UI
+        document.getElementById('totalMonthlySalaries').textContent = `Ksh ${totalMonthly.toFixed(2)}`;
+        document.getElementById('dailySavingsNeeded').textContent = `Ksh ${dailySavingsNeeded.toFixed(2)}`;
+          getElement('currentSavings').textContent = `Ksh ${currentSavings.toFixed(2)}`;
+        
+        // Initialize savings chart
+        updateSavingsChart(totalMonthly, daysUntilPayment);
+    } catch (error) {
+        console.error('Error updating savings analytics:', error);
+    }
+}
+
+function updateSavingsAnalytics(payments, dailySavings) {
+    // Calculate totals
+    const totalMonthly = payments
+        .filter(p => p.frequency === 'Monthly')
+        .reduce((sum, p) => sum + p.amount, 0);
+    
+    const totalWeekly = payments
+        .filter(p => p.frequency === 'Weekly')
+        .reduce((sum, p) => sum + p.amount, 0);
+    
+    const totalBiweekly = payments
+        .filter(p => p.frequency === 'Biweekly')
+        .reduce((sum, p) => sum + p.amount, 0);
+    
+    const totalAmount = totalMonthly + totalWeekly + totalBiweekly;
+    
+    // Find the nearest payment date
+    const nearestPayment = payments.length > 0 ? payments[0] : null;
+    const daysUntilNearest = nearestPayment ? nearestPayment.daysUntil : 0;
+    
+    // Update summary cards
+    document.getElementById('totalMonthlySalaries').textContent = `Ksh ${totalAmount.toFixed(2)}`;
+    
+    if (nearestPayment) {
+        document.getElementById('dailySavingsNeeded').textContent = 
+            `Ksh ${(nearestPayment.amount / daysUntilNearest).toFixed(2)}`;
+    }
+    
+    document.getElementById('currentSavings').textContent = 
+        `Ksh ${(dailySavings * (daysUntilNearest - Math.floor(daysUntilNearest * 0.7))).toFixed(2)}`;
+    
+    // Update savings chart
+    updateSavingsChart(totalAmount, dailySavings, daysUntilNearest);
+}
+
+function updateSavingsChart(totalNeeded, dailySavings, daysLeft) {
+    const ctx = document.getElementById('savingsChart').getContext('2d');
+    
+    // Destroy previous chart if it exists
+    if (window.savingsChart) {
+        window.savingsChart.destroy();
+    }
+    
+    const projectedSavings = dailySavings * daysLeft;
+    const percentage = Math.min(100, (projectedSavings / totalNeeded) * 100);
+    
+    // Update status message
+    const savingsStatus = document.getElementById('savingsStatus');
+    if (savingsStatus) {
+        if (dailySavings === 0) {
+            savingsStatus.className = 'alert alert-info';
+            savingsStatus.innerHTML = 'Enter daily savings amount to see projections';
+        } else if (percentage >= 100) {
+            savingsStatus.className = 'alert alert-success';
+            savingsStatus.innerHTML = `Projected savings cover ${percentage.toFixed(1)}% of needs`;
+        } else {
+            savingsStatus.className = 'alert alert-warning';
+            savingsStatus.innerHTML = `Projected savings cover ${percentage.toFixed(1)}% of needs - increase daily savings`;
+        }
+    }
+    
+     renderSalarySavingsChart(totalMonthlySalaries, dailySavingsNeeded, remainingDailySavings);
+    
+      // Destroy existing chart if it exists
+    if (window.savingsChartInstance) {
+        window.savingsChartInstance.destroy();
+    }
+    
+    window.savingsChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Total Monthly', 'Daily Needed', 'Remaining Daily'],
+            datasets: [{
+                label: 'Salary Savings (Ksh)',
+                data: [totalMonthly, dailyNeeded, remainingDaily],
+                backgroundColor: [
+                    'rgba(54, 162, 235, 0.5)',
+                    'rgba(75, 192, 192, 0.5)',
+                    'rgba(255, 99, 132, 0.5)'
+                ],
+                borderColor: [
+                    'rgba(54, 162, 235, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(255, 99, 132, 1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Amount (Ksh)'
+                    }
+                }
+            }
+        }
+    });
+
+
+    // Create new chart
+    window.savingsChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Projected Savings', 'Remaining Need'],
+            datasets: [{
+                data: [projectedSavings, Math.max(0, totalNeeded - projectedSavings)],
+                backgroundColor: [
+                    percentage >= 100 ? '#28a745' : '#ffc107',
+                    '#dc3545'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.label}: Ksh ${context.raw.toFixed(2)} (${Math.round((context.raw / totalNeeded) * 100)}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function handleEmployeeComment(e) {
+    e.preventDefault();
+    
+    try {
+        const empId = getElement('commentEmpId').value;
+        const commentType = getElement('commentType').value;
+        const rating = parseInt(getElement('commentRating').value);
+        const commentText = getElement('commentText').value;
+        
+        if (!empId || !commentType || isNaN(rating) || !commentText) {
+            throw new Error('All fields are required');
+        }
+        
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        const newComment = {
+            empId: empId,
+            date: new Date().toISOString(),
+            type: commentType,
+            rating: rating,
+            comment: commentText,
+            recordedAt: new Date().toISOString()
+        };
+        
+        comments.push(newComment);
+        saveData();
+        
+        showAlert('Comment added successfully!');
+        getElement('commentForm').reset();
+        
+        // Update employee records
+        fetchEmployeeRecords(empId);
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Render employee comments chart
+function renderEmployeeCommentsChart(empId) {
+    const ctx = document.getElementById('commentsChart').getContext('2d');
+    const empComments = comments.filter(c => c.empId === empId);
+    
+    if (empComments.length === 0) {
+        return;
+    }
+    
+    // Group comments by month
+    const commentData = {};
+    empComments.forEach(comment => {
+        const month = comment.date.substring(0, 7);
+        if (!commentData[month]) {
+            commentData[month] = { positive: 0, negative: 0, count: 0, sum: 0 };
+        }
+        
+        if (comment.type === 'positive') {
+            commentData[month].positive++;
+        } else {
+            commentData[month].negative++;
+        }
+        
+        commentData[month].count++;
+        commentData[month].sum += comment.rating;
+    });
+    
+    const months = Object.keys(commentData).sort();
+    const positiveData = months.map(month => commentData[month].positive);
+    const negativeData = months.map(month => commentData[month].negative);
+    const avgRatingData = months.map(month => commentData[month].sum / commentData[month].count);
+    
+    // Destroy existing chart if it exists
+    if (window.commentsChartInstance) {
+        window.commentsChartInstance.destroy();
+    }
+    
+    window.commentsChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: months,
+            datasets: [
+                {
+                    label: 'Positive Comments',
+                    data: positiveData,
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    fill: false
+                },
+                {
+                    label: 'Negative Comments',
+                    data: negativeData,
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    fill: false
+                },
+                {
+                    label: 'Average Rating',
+                    data: avgRatingData,
+                    borderColor: 'rgba(153, 102, 255, 1)',
+                    backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                    fill: false,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Comment Count'
+                    }
+                },
+                y1: {
+                    position: 'right',
+                    beginAtZero: true,
+                    max: 5,
+                    title: {
+                        display: true,
+                        text: 'Average Rating'
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Generate insight based on comments
+function generateEmployeeInsight(empId) {
+    const empComments = comments.filter(c => c.empId === empId);
+    if (empComments.length === 0) return null;
+    
+    const positiveComments = empComments.filter(c => c.type === 'positive');
+    const negativeComments = empComments.filter(c => c.type === 'negative');
+    
+    const positivePercentage = (positiveComments.length / empComments.length) * 100;
+    const negativePercentage = (negativeComments.length / empComments.length) * 100;
+    
+    const avgRating = empComments.reduce((sum, c) => sum + c.rating, 0) / empComments.length;
+    
+    let insight = '';
+    let action = '';
+    
+    if (negativePercentage > 40 && avgRating < 2.5) {
+        insight = 'Consistent negative feedback and low ratings';
+        action = 'Consider termination or performance improvement plan';
+    } else if (negativePercentage > 30 && avgRating < 3.0) {
+        insight = 'Frequent negative feedback with below average ratings';
+        action = 'Requires immediate coaching and performance review';
+    } else if (positivePercentage > 70 && avgRating > 4.0) {
+        insight = 'Excellent performance with consistently high ratings';
+        action = 'Consider for promotion or bonus';
+    } else if (positivePercentage > 60 && avgRating > 3.5) {
+        insight = 'Good performance with positive feedback';
+        action = 'Suitable for additional responsibilities';
+    } else {
+        insight = 'Satisfactory performance with mixed feedback';
+        action = 'Regular monitoring and development opportunities';
+    }
+    
+    return {
+        insight: insight,
+        action: action,
+        positivePercentage: positivePercentage,
+        negativePercentage: negativePercentage,
+        avgRating: avgRating
+    };
+}
+
+// Export all employee data
+function exportAllEmployeeData() {
+    try {
+        if (employees.length === 0) {
+            throw new Error('No employees to export');
+        }
+        
+        // Prepare data for export
+        const exportData = employees.map(emp => {
+            const empData = {
+                id: emp.id,
+                name: emp.name,
+                phone: emp.phone,
+                email: emp.email || '',
+                shift: emp.shift,
+                workingDays: emp.workingDays,
+                salary: emp.salary,
+                paymentFrequency: emp.paymentFrequency,
+                paymentDay: emp.paymentDay,
+                department: emp.department || '',
+                status: emp.status,
+                photoUrl: emp.photoUrl || '',
+                registered: formatDate(emp.createdAt),
+                lastUpdated: emp.updatedAt ? formatDate(emp.updatedAt) : 'N/A'
+            };
+            
+            // Add related records
+            empData.attendance = attendanceRecords.filter(att => att.empId === emp.id);
+            empData.leaveRecords = leaveRecords.filter(leave => leave.empId === emp.id);
+            empData.deductions = deductions.filter(ded => ded.empId === emp.id);
+            empData.salaryRecords = salaryRecords.filter(sal => sal.empId === emp.id);
+            empData.comments = comments.filter(com => com.empId === emp.id);
+            
+            return empData;
+        });
+        
+        // Create a blob and download
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bamburi_tilapia_employees_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showAlert('All employee data exported successfully!');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+// Export single employee data
+function exportSingleEmployeeData(empId) {
+    try {
+        const employee = employees.find(emp => emp.id === empId);
+        if (!employee) {
+            throw new Error('Employee not found');
+        }
+        
+        // Prepare data for export
+        const exportData = {
+            id: employee.id,
+            name: employee.name,
+            phone: employee.phone,
+            email: employee.email || '',
+            shift: employee.shift,
+            workingDays: employee.workingDays,
+            salary: employee.salary,
+            paymentFrequency: employee.paymentFrequency,
+            paymentDay: employee.paymentDay,
+            department: employee.department || '',
+            status: employee.status,
+            photoUrl: employee.photoUrl || '',
+            registered: formatDate(employee.createdAt),
+            lastUpdated: employee.updatedAt ? formatDate(employee.updatedAt) : 'N/A',
+            attendance: attendanceRecords.filter(att => att.empId === empId),
+            leaveRecords: leaveRecords.filter(leave => leave.empId === empId),
+            deductions: deductions.filter(ded => ded.empId === empId),
+            salaryRecords: salaryRecords.filter(sal => sal.empId === empId),
+            comments: comments.filter(com => com.empId === empId)
+        };
+        
+        // Create a blob and download
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bamburi_tilapia_employee_${empId}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showAlert('Employee data exported successfully!');
+    } catch (error) {
+        showAlert(error.message, 'error');
+    }
+}
+
+
+
+// Helper function to get next specific day of week
+function getNextDayOfWeek(date, dayOfWeek) {
+    const result = new Date(date);
+    result.setDate(date.getDate() + ((dayOfWeek + 7 - date.getDay()) % 7));
+    return result;
+}
+
+function updateSavingsChart(totalNeeded, daysLeft) {
+    try {
+        const ctx = document.getElementById('savingsChart').getContext('2d');
+        const dailyAmount = parseFloat(document.getElementById('dailySavingsAmount').value) || 0;
+        
+        // Calculate projection
+        const projectedSavings = dailyAmount * daysLeft;
+        const percentage = Math.min(100, (projectedSavings / totalNeeded) * 100);
+        
+        // Update savings status
+        const savingsStatus = document.getElementById('savingsStatus');
+        if (savingsStatus) {
+            if (dailyAmount === 0) {
+                savingsStatus.className = 'alert alert-info';
+                savingsStatus.innerHTML = 'Enter daily savings amount to see projections';
+            } else if (projectedSavings >= totalNeeded) {
+                savingsStatus.className = 'alert alert-success';
+                savingsStatus.innerHTML = `Projected savings: Ksh ${projectedSavings.toFixed(2)} (100%) - You're on track!`;
+            } else {
+                savingsStatus.className = 'alert alert-warning';
+                savingsStatus.innerHTML = `Projected savings: Ksh ${projectedSavings.toFixed(2)} (${percentage.toFixed(1)}%) - Increase daily amount to meet target`;
+            }
+        }
+        
+        // Update current savings display
+        document.getElementById('currentSavings').textContent = `Ksh ${(dailyAmount * (daysLeft - Math.floor(daysLeft * 0.7))).toFixed(2)}`;
+        
+        // Destroy existing chart if it exists
+        if (window.savingsChart) {
+            window.savingsChart.destroy();
+        }
+        
+        // Create new chart
+        window.savingsChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Saved', 'Remaining'],
+                datasets: [{
+                    data: [projectedSavings, Math.max(0, totalNeeded - projectedSavings)],
+                    backgroundColor: [
+                        projectedSavings >= totalNeeded ? '#28a745' : '#ffc107',
+                        '#dc3545'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.raw || 0;
+                                const percentage = Math.round((value / totalNeeded) * 100);
+                                return `${label}: Ksh ${value.toFixed(2)} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error updating savings chart:', error);
+    }
+}
+
+// Add this to your setupEventListeners function
+document.getElementById('updateSavingsBtn')?.addEventListener('click', function() {
+    updateSavingsAnalytics();
+});
+
 // Update salary reports panel
 function updateSalaryReports() {
     try {
@@ -3923,4 +6065,32 @@ function viewMonthlyReport(month) {
     } catch (error) {
         showAlert(error.message, 'error');
     }
+    }
+}
+
+// Check salary status for current month
+function checkSalaryStatus(employeeId) {
+  const currentMonth = new Date().getMonth();
+  const salary = salaryRecords.find(
+    s => s.empId === employeeId && s.month === currentMonth
+  );
+
+  if (!salary) return "Pending";
+  if (salary.paidDate) return "Processed";
+  if (new Date() > new Date(salary.dueDate)) return "Delayed";
+  return "Pending";
+}
+
+// Send reminders to HR if salaries are delayed
+function sendSalaryReminders() {
+  const delayedSalaries = salaryRecords.filter(
+    s => !s.paidDate && new Date() > new Date(s.dueDate)
+  );
+
+  delayedSalaries.forEach(salary => {
+    sendAlert(
+      `Salary delayed for ${getEmployee(salary.empId).name}`,
+      "HR"
+    );
+  });
 }
